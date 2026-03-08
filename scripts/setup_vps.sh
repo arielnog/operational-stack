@@ -294,7 +294,17 @@ if [[ "$HAS_KEY" =~ ^[sS]$ ]]; then
     sed -i 's/^#*PermitRootLogin.*/PermitRootLogin prohibit-password/' /etc/ssh/sshd_config
     sed -i 's/^#*PubkeyAuthentication.*/PubkeyAuthentication yes/' /etc/ssh/sshd_config
 
-    systemctl restart sshd
+    # Detectar nome correto do serviço SSH
+    if systemctl list-units --type=service | grep -q "sshd.service"; then
+      SSH_SERVICE="sshd"
+    elif systemctl list-units --type=service | grep -q "ssh.service"; then
+      SSH_SERVICE="ssh"
+    else
+      SSH_SERVICE="ssh"  # default fallback
+    fi
+    
+    info "Reiniciando serviço SSH ($SSH_SERVICE)..."
+    systemctl restart "$SSH_SERVICE"
     ok "Login SSH por senha desabilitado."
     ok "Apenas chave SSH permitida daqui em diante."
   else
