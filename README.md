@@ -72,7 +72,7 @@ Metabase  Grafana   Suas Apps    (futuras apps)
 
 ---
 
-## �️ Scripts disponíveis
+## 🛠️ Scripts disponíveis
 
 | Script | Quando usar | O que faz |
 |--------|-------------|-----------|
@@ -88,9 +88,25 @@ Metabase  Grafana   Suas Apps    (futuras apps)
 4. configurar .env e subir a stack
 5. `create_app_user.sh` ← para cada aplicação
 
+### Como usar o `setup_ssh.sh`
+
+O script `setup_ssh.sh` realiza o hardening do SSH, incluindo:
+- Alteração da porta padrão
+- Restrição de algoritmos inseguros
+- Criação de usuário dedicado para acesso
+- Desabilitação de login por senha
+
+Execute como root:
+
+```bash
+sudo bash scripts/setup_ssh.sh
+```
+
+Siga as instruções interativas para configurar o SSH de forma segura.
+
 ---
 
-## �🚀 Guia de execução — passo a passo
+## 🚀 Guia de execução — passo a passo
 
 ### Pré-requisitos (na sua máquina local)
 
@@ -190,27 +206,31 @@ Preencha cada variável:
 DOMAIN=seudominio.com
 
 # Token da Cloudflare (veja como obter abaixo)
-CF_DNS_API_TOKEN=seu_token_aqui
+CF_DNS_API_TOKEN=seu_token_cloudflare_aqui
 
 # PostgreSQL — superusuário
 POSTGRES_USER=admin
-POSTGRES_PASSWORD=UmaSenhaForteAqui123!
+POSTGRES_PASSWORD=TROQUE_POR_SENHA_FORTE
 POSTGRES_DB=main
 
 # Redis
-REDIS_PASSWORD=OutraSenhaForte456!
+REDIS_PASSWORD=TROQUE_POR_SENHA_FORTE
 
-# Metabase (usuário separado no Postgres)
+# Metabase (usuário dedicado no Postgres)
 METABASE_DB=metabase
 METABASE_DB_USER=metabase_user
-METABASE_DB_PASSWORD=SenhaMetabase789!
+METABASE_DB_PASSWORD=TROQUE_POR_SENHA_FORTE
 
 # Grafana
 GRAFANA_USER=admin
-GRAFANA_PASSWORD=SenhaGrafana321!
+GRAFANA_PASSWORD=TROQUE_POR_SENHA_FORTE
 GRAFANA_DB=grafana
 GRAFANA_DB_USER=grafana_user
-GRAFANA_DB_PASSWORD=SenhaGrafanaDB654!
+GRAFANA_DB_PASSWORD=TROQUE_POR_SENHA_FORTE
+
+# Dashboard Traefik (basic auth)
+# Gere com: echo "usuario:$(openssl passwd -apr1 senha)" | sed -e 's/\$/\$\$/g'
+TRAEFIK_DASHBOARD_AUTH=usuario:$$apr1$$hash$$aqui
 ```
 
 ---
@@ -379,7 +399,7 @@ docker compose -f /opt/minha-api/docker-compose.yml up -d
 
 - **`proxy`** — Traefik + containers que precisam ser acessados externamente
 - **`internal`** — Postgres, Redis, Loki — inacessível de fora
-- **`observability`** — Grafana ↔ Loki ↔ Promtail
+- **`observability`** — Rede dedicada para observabilidade. Permite que Grafana, Loki e Promtail troquem dados de métricas e logs de forma isolada, sem expor portas externas. Use esta rede para conectar serviços de monitoramento e logging.
 
 ---
 
@@ -431,28 +451,49 @@ docker exec postgres pg_dumpall -U admin > backup_$(date +%Y%m%d).sql
 
 ## ❗ Troubleshooting
 
-**SSL não está sendo emitido:**
+### SSL não está sendo emitido
 ```bash
 docker compose logs traefik | grep -i "acme\|certificate\|error"
-# Verifique se o token Cloudflare está correto e o domínio apontando para a VPS
+# Verifique:
+# - Token Cloudflare correto no .env
+# - Domínio realmente aponta para o IP da VPS
+# - Porta 443 aberta no firewall
 ```
 
-**Container não sobe (unhealthy):**
+### Container não sobe (unhealthy)
 ```bash
 docker compose logs nome_do_servico
 docker inspect nome_do_servico | jq '.[0].State'
+# Verifique variáveis de ambiente, dependências e healthchecks
 ```
 
-**Postgres não conecta:**
+### Postgres não conecta
 ```bash
 docker exec -it postgres pg_isready -U admin
-# Verifique se as variáveis POSTGRES_USER e POSTGRES_PASSWORD estão no .env
+# Verifique:
+# - POSTGRES_USER e POSTGRES_PASSWORD no .env
+# - Rede interna configurada corretamente
+# - Container da aplicação está na rede 'internal'
 ```
 
-**Traefik não roteia para a app:**
+### Traefik não roteia para a app
 ```bash
 # Verifique se a app está na rede 'proxy'
 docker network inspect proxy
 # Verifique as labels no docker-compose da app
 docker inspect nome_da_app | jq '.[0].Config.Labels'
+# Certifique-se de que não há conflito de portas ou subdomínios
+```
+
+### Firewall bloqueando acesso
+```bash
+ufw status verbose
+# Confirme se portas 22, 80, 443 estão abertas
+# Use 'ufw allow' para liberar portas se necessário
+```
+
+### Falha no backup do banco
+```bash
+docker exec postgres pg_dumpall -U admin > backup_$(date +%Y%m%d).sql
+# Verifique espaço em disco e permissões
 ```
