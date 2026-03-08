@@ -109,7 +109,7 @@ ok "Ferramentas de segurança instaladas."
 # =============================================================
 # ETAPA 3 — Instalar Docker
 # =============================================================
-step "ETAPA 3/9 — Instalando Docker"
+step "ETAPA 3/11 — Instalando Docker"
 
 if command -v docker &> /dev/null; then
   ok "Docker já instalado: $(docker --version)"
@@ -147,7 +147,7 @@ fi
 # =============================================================
 # ETAPA 4 — Configurar daemon do Docker
 # =============================================================
-step "ETAPA 4/9 — Configurando daemon do Docker"
+step "ETAPA 4/11 — Configurando daemon do Docker"
 
 info "Escrevendo /etc/docker/daemon.json..."
 cat > /etc/docker/daemon.json <<'EOF'
@@ -172,7 +172,7 @@ info "  userland-proxy: desabilitado (melhor performance)"
 # =============================================================
 # ETAPA 5 — Rede Docker 'proxy'
 # =============================================================
-step "ETAPA 5/9 — Criando rede Docker 'proxy'"
+step "ETAPA 5/11 — Criando rede Docker 'proxy'"
 
 if docker network ls --format '{{.Name}}' | grep -q "^proxy$"; then
   ok "Rede 'proxy' já existe."
@@ -187,7 +187,7 @@ docker network ls --format "  • {{.Name}} ({{.Driver}})"
 # =============================================================
 # ETAPA 6 — Fail2Ban
 # =============================================================
-step "ETAPA 6/9 — Configurando Fail2Ban (proteção contra brute force)"
+step "ETAPA 6/11 — Configurando Fail2Ban (proteção contra brute force)"
 
 info "Escrevendo /etc/fail2ban/jail.local..."
 cat > /etc/fail2ban/jail.local <<'EOF'
@@ -215,7 +215,7 @@ info "  maxretry SSH:  3 tentativas → IP bloqueado"
 # =============================================================
 # ETAPA 7 — Segurança SSH
 # =============================================================
-step "ETAPA 7/9 — Segurança SSH"
+step "ETAPA 7/11 — Segurança SSH"
 
 warn "ATENÇÃO: Antes de desabilitar login por senha, confirme que"
 warn "sua chave SSH já está no servidor em ~/.ssh/authorized_keys"
@@ -250,7 +250,7 @@ fi
 # =============================================================
 # ETAPA 8 — Diretórios
 # =============================================================
-step "ETAPA 8/9 — Criando diretórios necessários"
+step "ETAPA 8/11 — Criando diretórios necessários"
 
 mkdir -p /var/log/traefik
 mkdir -p /etc/iptables
@@ -260,7 +260,7 @@ ok "Criado: /etc/iptables"
 # =============================================================
 # ETAPA 9 — Firewall
 # =============================================================
-step "ETAPA 9/9 — Configurando Firewall (UFW + iptables)"
+step "ETAPA 9/11 — Configurando Firewall (UFW + iptables)"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 bash "$SCRIPT_DIR/setup_firewall.sh"
