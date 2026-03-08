@@ -1,0 +1,39 @@
+version: "3.9"
+
+# =============================================================
+#  Exemplo: docker-compose de uma aplicação Node/PHP
+#  que se conecta à infraestrutura base (vps-stack)
+#
+#  As redes 'proxy' e 'internal' são externas (criadas pelo vps-stack)
+# =============================================================
+
+networks:
+  proxy:
+    external: true     # Rede do Traefik
+  internal:
+    external: true     # Rede interna — acesso ao Postgres e Redis
+
+services:
+  minha-api:
+    build: .
+    container_name: minha-api
+    restart: unless-stopped
+    networks:
+      - proxy          # Para o Traefik rotear
+      - internal       # Para acessar Postgres, Redis
+    environment:
+      # String de conexão usando o schema dedicado
+      DATABASE_URL: postgresql://minha_api_user:SENHA@postgres:5432/main?search_path=minha_api
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
+      NODE_ENV: production
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.minha-api.rule=Host(`api.seudominio.com`)"
+      - "traefik.http.routers.minha-api.entrypoints=websecure"
+      - "traefik.http.routers.minha-api.tls.certresolver=cloudflare"
+      - "traefik.http.routers.minha-api.middlewares=secureApp@file"
+      - "traefik.http.services.minha-api.loadbalancer.server.port=3000"
+      # Labels para o Promtail identificar os logs
+      - "logging=promtail"
+      - "logging_jobname=minha-api"
+    # NÃO expor porta diretamente — o Traefik cuida disso

@@ -1,0 +1,61 @@
+# traefik.yml — Configuração estática do Traefik
+
+global:
+  checkNewVersion: false
+  sendAnonymousUsage: false
+
+api:
+  dashboard: true
+  insecure: false   # Dashboard só via rota autenticada
+
+ping: {}
+
+log:
+  level: WARN
+  format: json
+
+accessLog:
+  format: json
+
+entryPoints:
+  web:
+    address: ":80"
+    http:
+      redirections:
+        entryPoint:
+          to: websecure
+          scheme: https
+          permanent: true
+
+  websecure:
+    address: ":443"
+    http:
+      tls:
+        certResolver: cloudflare
+        domains:
+          - main: "{{ env \"DOMAIN\" }}"
+            sans:
+              - "*.{{ env \"DOMAIN\" }}"
+      middlewares:
+        - secHeaders@file
+
+certificatesResolvers:
+  cloudflare:
+    acme:
+      email: arielnnogueira@hotmail.com
+      storage: /certs/acme.json
+      caServer: https://acme-v02.api.letsencrypt.org/directory
+      dnsChallenge:
+        provider: cloudflare
+        resolvers:
+          - "1.1.1.1:53"
+          - "1.0.0.1:53"
+
+providers:
+  docker:
+    endpoint: "unix:///var/run/docker.sock"
+    exposedByDefault: false         # Serviços precisam de label traefik.enable=true
+    network: proxy
+  file:
+    filename: /dynamic.yml
+    watch: true
