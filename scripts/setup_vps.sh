@@ -72,6 +72,19 @@ dpkg --configure -a
 apt-get install -f -y
 apt-get autoremove -y
 apt-get update -qq
+
+# Verificar se ainda há problemas
+info "Verificando estado dos pacotes..."
+if apt list --upgradable 2>/dev/null | grep -q "upgradable"; then
+  warn "Há pacotes que podem ser atualizados, isso pode causar conflitos"
+fi
+
+# Verificar pacotes held
+if dpkg --get-selections | grep hold | head -5; then
+  warn "Encontrados pacotes em hold (retidos). Isso pode causar conflitos:"
+  dpkg --get-selections | grep hold
+fi
+
 ok "Sistema limpo e dependências corrigidas."
 
 # =============================================================
@@ -102,9 +115,57 @@ info "Instalando ferramentas de rede: ${NETWORK_PACKAGES[*]}"
 DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "${NETWORK_PACKAGES[@]}"
 ok "Ferramentas de rede instaladas."
 
-info "Instalando ferramentas de segurança: ${SECURITY_PACKAGES[*]}"
-DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "${SECURITY_PACKAGES[@]}"
-ok "Ferramentas de segurança instaladas."
+info "Instalando ferramentas de segurança individualmente..."
+
+# Instalar cada pacote de segurança individualmente para identificar problemas
+for pkg in "${SECURITY_PACKAGES[@]}"; do
+  info "Tentando instalar: $pkg"
+  if DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "$pkg" 2>/dev/null; then
+    ok "$pkg instalado com sucesso"
+  else
+    warn "Falha ao instalar $pkg. Verificando se já está instalado..."
+    if dpkg -l | grep -q "^ii  $pkg "; then
+      ok "$pkg já estava instalado"
+    else
+      err "Não foi possível instalar $pkg. Continuando sem ele por enquanto..."
+      info "Você pode tentar instalar manualmente depois: apt-get install $pkg"
+    fi
+  fi
+done
+
+# Tentar corrigir problemas residuais
+info "Corrigindo possíveis problemas residuais..."
+apt-get install -f -y 2>/dev/null || true
+
+# Validação final dos pacotes essenciais
+info "Verificando instalação dos pacotes essenciais..."
+CRITICAL_COMMANDS=("curl" "ufw")
+OPTIONAL_PACKAGES=("fail2ban" "iptables-persistent")
+
+for cmd in "${CRITICAL_COMMANDS[@]}"; do
+  if command -v "${cmd}" &> /dev/null; then
+    ok "$cmd - INSTALADO ✓"
+  else
+    err "$cmd - AUSENTE! Este é crítico para o funcionamento"
+  fi
+done
+
+# Verificar Docker separadamente (será instalado na próxima etapa)
+if command -v docker &> /dev/null; then
+  ok "docker - JÁ INSTALADO ✓"
+else
+  info "docker - será instalado na próxima etapa"
+fi
+
+for pkg in "${OPTIONAL_PACKAGES[@]}"; do
+  if dpkg -l | grep -q "^ii  $pkg "; then
+    ok "$pkg - INSTALADO ✓"
+  else
+    warn "$pkg - AUSENTE (opcional, pode instalar depois)"
+  fi
+done
+
+ok "Instalação de ferramentas de segurança concluída."
 
 # =============================================================
 # ETAPA 3 — Instalar Docker
