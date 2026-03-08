@@ -23,6 +23,13 @@
 
 set -euo pipefail
 
+# ── Arquivo de estado (idempotência) ─────────────────────────
+STATE_FILE="/var/lib/vps-setup-state"
+touch "$STATE_FILE" 2>/dev/null || true
+
+step_done()   { grep -qxF "$1" "$STATE_FILE" 2>/dev/null; }
+mark_done()   { echo "$1" >> "$STATE_FILE"; }
+
 # ── Helpers de output ─────────────────────────────────────────
 BOLD='\033[1m'
 GREEN='\033[0;32m'
@@ -50,47 +57,24 @@ echo -e "  Ubuntu $(lsb_release -rs 2>/dev/null || echo '?') | $(date '+%d/%m/%Y
 divider
 
 # =============================================================
-# ETAPA 1 — Atualizar sistema
+# ETAPA 1/9 — Atualizar sistema
 # =============================================================
-step "ETAPA 1/10 — Atualizando sistema"
+step "ETAPA 1/9 — Atualizando sistema"
 info "Executando apt-get update e upgrade..."
 apt-get update -qq
 DEBIAN_FRONTEND=noninteractive apt-get upgrade -y -qq
 ok "Sistema atualizado."
 
 # =============================================================
-# ETAPA 2a — Corrigir dependências quebradas
+# ETAPA 2/9 — Instalar dependências essenciais
 # =============================================================
-step "ETAPA 2a/11 — Corrigindo dependências quebradas"
+step "ETAPA 2/9 — Instalando dependências essenciais"
+
+# Corrigir dependências quebradas primeiro
 info "Verificando e corrigindo pacotes quebrados..."
 apt-get check 2>/dev/null || true
-info "Limpando cache do apt..."
-apt-get clean
-apt-get autoclean
-info "Corrigindo dependências quebradas..."
-dpkg --configure -a
-apt-get install -f -y
-apt-get autoremove -y
-apt-get update -qq
-
-# Verificar se ainda há problemas
-info "Verificando estado dos pacotes..."
-if apt list --upgradable 2>/dev/null | grep -q "upgradable"; then
-  warn "Há pacotes que podem ser atualizados, isso pode causar conflitos"
-fi
-
-# Verificar pacotes held
-if dpkg --get-selections | grep hold | head -5; then
-  warn "Encontrados pacotes em hold (retidos). Isso pode causar conflitos:"
-  dpkg --get-selections | grep hold
-fi
-
-ok "Sistema limpo e dependências corrigidas."
-
-# =============================================================
-# ETAPA 2b — Instalar dependências essenciais
-# =============================================================
-step "ETAPA 2b/11 — Instalando dependências essenciais"
+dpkg --configure -a 2>/dev/null || true
+apt-get install -f -y 2>/dev/null || true
 
 # Instalar em grupos menores para evitar conflitos
 BASIC_PACKAGES=(
@@ -115,62 +99,27 @@ info "Instalando ferramentas de rede: ${NETWORK_PACKAGES[*]}"
 DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "${NETWORK_PACKAGES[@]}"
 ok "Ferramentas de rede instaladas."
 
+# Instalar cada pacote de segurança individualmente (evita falha em cascata)
 info "Instalando ferramentas de segurança individualmente..."
-
-# Instalar cada pacote de segurança individualmente para identificar problemas
 for pkg in "${SECURITY_PACKAGES[@]}"; do
-  info "Tentando instalar: $pkg"
-  if DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "$pkg" 2>/dev/null; then
-    ok "$pkg instalado com sucesso"
+  if dpkg -l "$pkg" 2>/dev/null | grep -q "^ii"; then
+    ok "$pkg já instalado"
   else
-    warn "Falha ao instalar $pkg. Verificando se já está instalado..."
-    if dpkg -l | grep -q "^ii  $pkg "; then
-      ok "$pkg já estava instalado"
+    info "Tentando instalar: $pkg"
+    if DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "$pkg" 2>/dev/null; then
+      ok "$pkg instalado com sucesso"
     else
-      err "Não foi possível instalar $pkg. Continuando sem ele por enquanto..."
-      info "Você pode tentar instalar manualmente depois: apt-get install $pkg"
+      warn "Falha ao instalar $pkg — pode instalar depois: apt-get install $pkg"
     fi
   fi
 done
 
-# Tentar corrigir problemas residuais
-info "Corrigindo possíveis problemas residuais..."
-apt-get install -f -y 2>/dev/null || true
-
-# Validação final dos pacotes essenciais
-info "Verificando instalação dos pacotes essenciais..."
-CRITICAL_COMMANDS=("curl" "ufw")
-OPTIONAL_PACKAGES=("fail2ban" "iptables-persistent")
-
-for cmd in "${CRITICAL_COMMANDS[@]}"; do
-  if command -v "${cmd}" &> /dev/null; then
-    ok "$cmd - INSTALADO ✓"
-  else
-    err "$cmd - AUSENTE! Este é crítico para o funcionamento"
-  fi
-done
-
-# Verificar Docker separadamente (será instalado na próxima etapa)
-if command -v docker &> /dev/null; then
-  ok "docker - JÁ INSTALADO ✓"
-else
-  info "docker - será instalado na próxima etapa"
-fi
-
-for pkg in "${OPTIONAL_PACKAGES[@]}"; do
-  if dpkg -l | grep -q "^ii  $pkg "; then
-    ok "$pkg - INSTALADO ✓"
-  else
-    warn "$pkg - AUSENTE (opcional, pode instalar depois)"
-  fi
-done
-
-ok "Instalação de ferramentas de segurança concluída."
+ok "Dependências essenciais concluídas."
 
 # =============================================================
-# ETAPA 3 — Instalar Docker
+# ETAPA 3/9 — Instalar Docker
 # =============================================================
-step "ETAPA 3/11 — Instalando Docker"
+step "ETAPA 3/9 — Instalando Docker"
 
 if command -v docker &> /dev/null; then
   ok "Docker já instalado: $(docker --version)"
@@ -192,27 +141,31 @@ systemctl enable docker --quiet
 systemctl start docker
 ok "Docker habilitado no boot e rodando."
 
-echo ""
-read -p "  Adicionar usuário ao grupo docker (evita usar sudo)? [s/N]: " ADD_USER
-if [[ "$ADD_USER" =~ ^[sS]$ ]]; then
-  read -p "  Nome do usuário: " DOCKER_USER
-  if id "$DOCKER_USER" &>/dev/null; then
-    usermod -aG docker "$DOCKER_USER"
-    ok "Usuário '$DOCKER_USER' adicionado ao grupo docker."
-    warn "Faça logout/login para aplicar (ou: newgrp docker)"
-  else
-    err "Usuário '$DOCKER_USER' não encontrado. Pulando."
+# Adicionar usuário ao grupo docker (apenas se ainda não feito)
+if ! step_done "docker_user"; then
+  echo ""
+  read -p "  Adicionar usuário ao grupo docker (evita usar sudo)? [s/N]: " ADD_USER
+  if [[ "$ADD_USER" =~ ^[sS]$ ]]; then
+    read -p "  Nome do usuário: " DOCKER_USER
+    if id "$DOCKER_USER" &>/dev/null; then
+      usermod -aG docker "$DOCKER_USER"
+      ok "Usuário '$DOCKER_USER' adicionado ao grupo docker."
+      warn "Faça logout/login para aplicar (ou: newgrp docker)"
+    else
+      err "Usuário '$DOCKER_USER' não encontrado. Pulando."
+    fi
   fi
+  mark_done "docker_user"
+else
+  ok "Configuração de usuário Docker já realizada anteriormente."
 fi
 
 # =============================================================
-# ETAPA 4 — Configurar daemon do Docker
+# ETAPA 4/9 — Configurar daemon do Docker
 # =============================================================
-step "ETAPA 4/11 — Configurando daemon do Docker"
+step "ETAPA 4/9 — Configurando daemon do Docker"
 
-info "Escrevendo /etc/docker/daemon.json..."
-cat > /etc/docker/daemon.json <<'EOF'
-{
+DOCKER_DAEMON_DESIRED='{
   "log-driver": "json-file",
   "log-opts": {
     "max-size": "10m",
@@ -221,19 +174,24 @@ cat > /etc/docker/daemon.json <<'EOF'
   "iptables": true,
   "userland-proxy": false,
   "live-restore": true
-}
-EOF
+}'
 
-systemctl restart docker
-ok "Daemon Docker reconfigurado:"
+if [[ -f /etc/docker/daemon.json ]] && echo "$DOCKER_DAEMON_DESIRED" | diff -q - /etc/docker/daemon.json &>/dev/null; then
+  ok "daemon.json já configurado corretamente. Pulando restart."
+else
+  info "Escrevendo /etc/docker/daemon.json..."
+  echo "$DOCKER_DAEMON_DESIRED" > /etc/docker/daemon.json
+  systemctl restart docker
+  ok "Daemon Docker reconfigurado."
+fi
 info "  log-driver:    json-file (10MB × 3 arquivos por container)"
 info "  live-restore:  containers continuam se o daemon reiniciar"
 info "  userland-proxy: desabilitado (melhor performance)"
 
 # =============================================================
-# ETAPA 5 — Rede Docker 'proxy'
+# ETAPA 5/9 — Rede Docker 'proxy'
 # =============================================================
-step "ETAPA 5/11 — Criando rede Docker 'proxy'"
+step "ETAPA 5/9 — Criando rede Docker 'proxy'"
 
 if docker network ls --format '{{.Name}}' | grep -q "^proxy$"; then
   ok "Rede 'proxy' já existe."
@@ -246,12 +204,19 @@ info "Redes Docker disponíveis:"
 docker network ls --format "  • {{.Name}} ({{.Driver}})"
 
 # =============================================================
-# ETAPA 6 — Fail2Ban
+# ETAPA 6/9 — Fail2Ban
 # =============================================================
-step "ETAPA 6/11 — Configurando Fail2Ban (proteção contra brute force)"
+step "ETAPA 6/9 — Configurando Fail2Ban (proteção contra brute force)"
 
-info "Escrevendo /etc/fail2ban/jail.local..."
-cat > /etc/fail2ban/jail.local <<'EOF'
+if ! command -v fail2ban-client &> /dev/null; then
+  warn "Fail2Ban não instalado. Pulando configuração."
+  info "Instale depois: apt-get install fail2ban"
+else
+  if [[ -f /etc/fail2ban/jail.local ]] && grep -q "maxretry = 3" /etc/fail2ban/jail.local 2>/dev/null; then
+    ok "Fail2Ban já configurado anteriormente."
+  else
+    info "Escrevendo /etc/fail2ban/jail.local..."
+    cat > /etc/fail2ban/jail.local <<'EOF'
 [DEFAULT]
 bantime  = 3600
 findtime = 600
@@ -265,63 +230,74 @@ logpath  = %(sshd_log)s
 backend  = %(sshd_backend)s
 maxretry = 3
 EOF
-
-systemctl enable fail2ban --quiet
-systemctl restart fail2ban
-ok "Fail2Ban configurado e rodando:"
-info "  bantime:       1 hora"
-info "  findtime:      10 minutos"
-info "  maxretry SSH:  3 tentativas → IP bloqueado"
-
-# =============================================================
-# ETAPA 7 — Segurança SSH
-# =============================================================
-step "ETAPA 7/11 — Segurança SSH"
-
-warn "ATENÇÃO: Antes de desabilitar login por senha, confirme que"
-warn "sua chave SSH já está no servidor em ~/.ssh/authorized_keys"
-warn "Se errar aqui pode perder acesso à VPS!"
-echo ""
-read -p "  Sua chave SSH pública já está configurada no servidor? [s/N]: " HAS_KEY
-
-if [[ "$HAS_KEY" =~ ^[sS]$ ]]; then
-  read -p "  Desabilitar login por senha? (altamente recomendado) [s/N]: " DISABLE_PASSWD
-  if [[ "$DISABLE_PASSWD" =~ ^[sS]$ ]]; then
-    cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bak
-    info "Backup salvo em /etc/ssh/sshd_config.bak"
-
-    sed -i 's/^#*PasswordAuthentication.*/PasswordAuthentication no/' /etc/ssh/sshd_config
-    sed -i 's/^#*PermitRootLogin.*/PermitRootLogin prohibit-password/' /etc/ssh/sshd_config
-    sed -i 's/^#*PubkeyAuthentication.*/PubkeyAuthentication yes/' /etc/ssh/sshd_config
-
-    # Detectar nome correto do serviço SSH
-    if systemctl list-units --type=service | grep -q "sshd.service"; then
-      SSH_SERVICE="sshd"
-    elif systemctl list-units --type=service | grep -q "ssh.service"; then
-      SSH_SERVICE="ssh"
-    else
-      SSH_SERVICE="ssh"  # default fallback
-    fi
-    
-    info "Reiniciando serviço SSH ($SSH_SERVICE)..."
-    systemctl restart "$SSH_SERVICE"
-    ok "Login SSH por senha desabilitado."
-    ok "Apenas chave SSH permitida daqui em diante."
-  else
-    warn "Login por senha mantido. Configure uma chave e desabilite quando possível."
   fi
-else
-  warn "Pulando. Para configurar sua chave SSH depois:"
-  info "  Na sua máquina local:"
-  info "    ssh-keygen -t ed25519 -C 'seu@email.com'"
-  info "    ssh-copy-id usuario@ip_da_vps"
-  info "  Então rode este script novamente ou edite /etc/ssh/sshd_config"
+
+  systemctl enable fail2ban --quiet 2>/dev/null || true
+  systemctl restart fail2ban 2>/dev/null || true
+  ok "Fail2Ban configurado e rodando:"
+  info "  bantime:       1 hora"
+  info "  findtime:      10 minutos"
+  info "  maxretry SSH:  3 tentativas → IP bloqueado"
 fi
 
 # =============================================================
-# ETAPA 8 — Diretórios
+# ETAPA 7/9 — Segurança SSH
 # =============================================================
-step "ETAPA 8/11 — Criando diretórios necessários"
+step "ETAPA 7/9 — Segurança SSH"
+
+# Verificar se já foi configurado (password auth já desabilitado)
+if grep -q "^PasswordAuthentication no" /etc/ssh/sshd_config 2>/dev/null; then
+  ok "SSH já configurado: login por senha desabilitado."
+  ok "PubkeyAuthentication: $(grep -E '^PubkeyAuthentication' /etc/ssh/sshd_config 2>/dev/null || echo 'default (yes)')"
+else
+  # Ainda não configurado — perguntar apenas na primeira vez
+  if step_done "ssh_security"; then
+    ok "Segurança SSH já foi avaliada anteriormente. Pulando."
+  else
+    warn "ATENÇÃO: Antes de desabilitar login por senha, confirme que"
+    warn "sua chave SSH já está no servidor em ~/.ssh/authorized_keys"
+    warn "Se errar aqui pode perder acesso à VPS!"
+    echo ""
+    read -p "  Sua chave SSH pública já está configurada no servidor? [s/N]: " HAS_KEY
+
+    if [[ "$HAS_KEY" =~ ^[sS]$ ]]; then
+      read -p "  Desabilitar login por senha? (altamente recomendado) [s/N]: " DISABLE_PASSWD
+      if [[ "$DISABLE_PASSWD" =~ ^[sS]$ ]]; then
+        cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bak
+        info "Backup salvo em /etc/ssh/sshd_config.bak"
+
+        sed -i 's/^#*PasswordAuthentication.*/PasswordAuthentication no/' /etc/ssh/sshd_config
+        sed -i 's/^#*PermitRootLogin.*/PermitRootLogin prohibit-password/' /etc/ssh/sshd_config
+        sed -i 's/^#*PubkeyAuthentication.*/PubkeyAuthentication yes/' /etc/ssh/sshd_config
+
+        # Detectar nome correto do serviço SSH
+        if systemctl list-units --type=service --all | grep -q "sshd.service"; then
+          SSH_SERVICE="sshd"
+        else
+          SSH_SERVICE="ssh"
+        fi
+
+        info "Reiniciando serviço SSH ($SSH_SERVICE)..."
+        systemctl restart "$SSH_SERVICE"
+        ok "Login SSH por senha desabilitado."
+        ok "Apenas chave SSH permitida daqui em diante."
+      else
+        warn "Login por senha mantido. Configure uma chave e desabilite quando possível."
+      fi
+    else
+      warn "Pulando. Para configurar sua chave SSH depois:"
+      info "  Na sua máquina local:"
+      info "    ssh-keygen -t ed25519 -C 'seu@email.com'"
+      info "    ssh-copy-id usuario@ip_da_vps"
+    fi
+    mark_done "ssh_security"
+  fi
+fi
+
+# =============================================================
+# ETAPA 8/9 — Diretórios
+# =============================================================
+step "ETAPA 8/9 — Criando diretórios necessários"
 
 mkdir -p /var/log/traefik
 mkdir -p /etc/iptables
@@ -329,47 +305,43 @@ ok "Criado: /var/log/traefik"
 ok "Criado: /etc/iptables"
 
 # =============================================================
-# ETAPA 9 — Firewall
+# ETAPA 9/9 — Firewall
 # =============================================================
-step "ETAPA 9/11 — Configurando Firewall (UFW + iptables)"
+step "ETAPA 9/9 — Configurando Firewall (UFW + iptables)"
 
-# Verificar se UFW está instalado e tentar instalar se necessário
+# Verificar se UFW está instalado, tentar instalar se necessário
 if ! command -v ufw &> /dev/null; then
   warn "UFW não encontrado. Tentando instalar..."
-  if DEBIAN_FRONTEND=noninteractive apt-get install -y ufw; then
-    ok "UFW instalado com sucesso."
-  else
-    err "Falha ao instalar UFW. Pulando configuração de firewall."
-    warn "Configure o firewall manualmente depois: apt-get install ufw"
-    warn "Em seguida execute: ./scripts/setup_firewall.sh"
-    divider
-    echo -e "${BOLD}  ⚠️  Setup concluído com AVISOS${NC}"
-    echo -e "  Firewall não foi configurado - configure manualmente!"
-    exit 0
+  if ! DEBIAN_FRONTEND=noninteractive apt-get install -y ufw 2>/dev/null; then
+    err "Falha ao instalar UFW. Configure o firewall manualmente depois."
+    warn "  apt-get install ufw && bash scripts/setup_firewall.sh"
   fi
 fi
 
-# Verificar se o script de firewall existe
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-FIREWALL_SCRIPT="$SCRIPT_DIR/setup_firewall.sh"
+if command -v ufw &> /dev/null; then
+  SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  FIREWALL_SCRIPT="$SCRIPT_DIR/setup_firewall.sh"
 
-if [[ ! -f "$FIREWALL_SCRIPT" ]]; then
-  err "Script setup_firewall.sh não encontrado em $FIREWALL_SCRIPT"
-  warn "Configurando UFW básico manualmente..."
-  
-  # Configuração básica de firewall se o script não existir
-  ufw --force reset
-  ufw default deny incoming
-  ufw default allow outgoing
-  ufw allow ssh
-  ufw allow 80/tcp
-  ufw allow 443/tcp
-  ufw --force enable
-  
-  ok "Firewall básico configurado (SSH, HTTP, HTTPS permitidos)"
+  if [[ -f "$FIREWALL_SCRIPT" ]]; then
+    info "Executando script de firewall: $FIREWALL_SCRIPT"
+    bash "$FIREWALL_SCRIPT"
+  else
+    warn "Script setup_firewall.sh não encontrado."
+    if ufw status | grep -q "Status: active"; then
+      ok "UFW já está ativo."
+    else
+      info "Configurando UFW básico..."
+      ufw default deny incoming
+      ufw default allow outgoing
+      ufw allow ssh
+      ufw allow 80/tcp
+      ufw allow 443/tcp
+      ufw --force enable
+      ok "Firewall básico configurado (SSH, HTTP, HTTPS)"
+    fi
+  fi
 else
-  info "Executando script de firewall: $FIREWALL_SCRIPT"
-  bash "$FIREWALL_SCRIPT"
+  warn "Firewall não configurado (UFW indisponível)."
 fi
 
 # =============================================================
