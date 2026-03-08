@@ -16,14 +16,6 @@ http:
         referrerPolicy: "strict-origin-when-cross-origin"
         permissionsPolicy: "camera=(), microphone=(), geolocation=()"
 
-    # Basic Auth para o dashboard do Traefik
-    auth:
-      basicAuth:
-        usersFile: /dynamic_users.txt   # Montado via volume se preferir
-        # Ou inline:
-        # users:
-        #   - "usuario:$apr1$hash$aqui"
-
     # Rate limiting global
     rateLimit:
       rateLimit:
