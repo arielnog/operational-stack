@@ -333,8 +333,44 @@ ok "Criado: /etc/iptables"
 # =============================================================
 step "ETAPA 9/11 — Configurando Firewall (UFW + iptables)"
 
+# Verificar se UFW está instalado e tentar instalar se necessário
+if ! command -v ufw &> /dev/null; then
+  warn "UFW não encontrado. Tentando instalar..."
+  if DEBIAN_FRONTEND=noninteractive apt-get install -y ufw; then
+    ok "UFW instalado com sucesso."
+  else
+    err "Falha ao instalar UFW. Pulando configuração de firewall."
+    warn "Configure o firewall manualmente depois: apt-get install ufw"
+    warn "Em seguida execute: ./scripts/setup_firewall.sh"
+    divider
+    echo -e "${BOLD}  ⚠️  Setup concluído com AVISOS${NC}"
+    echo -e "  Firewall não foi configurado - configure manualmente!"
+    exit 0
+  fi
+fi
+
+# Verificar se o script de firewall existe
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-bash "$SCRIPT_DIR/setup_firewall.sh"
+FIREWALL_SCRIPT="$SCRIPT_DIR/setup_firewall.sh"
+
+if [[ ! -f "$FIREWALL_SCRIPT" ]]; then
+  err "Script setup_firewall.sh não encontrado em $FIREWALL_SCRIPT"
+  warn "Configurando UFW básico manualmente..."
+  
+  # Configuração básica de firewall se o script não existir
+  ufw --force reset
+  ufw default deny incoming
+  ufw default allow outgoing
+  ufw allow ssh
+  ufw allow 80/tcp
+  ufw allow 443/tcp
+  ufw --force enable
+  
+  ok "Firewall básico configurado (SSH, HTTP, HTTPS permitidos)"
+else
+  info "Executando script de firewall: $FIREWALL_SCRIPT"
+  bash "$FIREWALL_SCRIPT"
+fi
 
 # =============================================================
 # RESUMO FINAL
