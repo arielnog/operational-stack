@@ -34,7 +34,7 @@ services:
   # TRAEFIK — Proxy reverso + SSL automático via Let's Encrypt
   # -----------------------------------------------------------
   traefik:
-    image: traefik:v3.1
+    image: traefik:v3.3
     container_name: traefik
     restart: unless-stopped
     security_opt:
@@ -83,6 +83,13 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB}
       PGDATA: /var/lib/postgresql/data/pgdata
+      # Variáveis usadas pelo script 02_create_services.sh
+      METABASE_DB: ${METABASE_DB}
+      METABASE_DB_USER: ${METABASE_DB_USER}
+      METABASE_DB_PASSWORD: ${METABASE_DB_PASSWORD}
+      GRAFANA_DB: ${GRAFANA_DB}
+      GRAFANA_DB_USER: ${GRAFANA_DB_USER}
+      GRAFANA_DB_PASSWORD: ${GRAFANA_DB_PASSWORD}
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./postgres/init:/docker-entrypoint-initdb.d:ro   # Scripts executados na criação

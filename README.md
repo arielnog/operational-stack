@@ -227,14 +227,21 @@ Procure a linha com `seu@email.com` e substitua pelo seu e-mail real. O Let's En
 
 **5b. Obter o token da Cloudflare:**
 
-1. Acesse: https://dash.cloudflare.com/profile/api-tokens
-2. Clique em **Create Token**
-3. Use o template **Edit zone DNS**
-4. Em "Zone Resources" selecione: **Specific zone → seu domínio**
-5. Clique em **Continue to summary → Create Token**
-6. Copie o token e cole no `.env` em `CF_DNS_API_TOKEN`
+1. Acesse: [https://dash.cloudflare.com/profile/api-tokens](https://dash.cloudflare.com/profile/api-tokens)
+2. Clique em **"Create Token"**
+3. Procure o template **"Edit zone DNS"** e clique em **"Use template"**
+4. Configure as permissões:
+   - **Permissions**: `Zone` → `DNS` → `Edit` (já vem preenchido pelo template)
+   - **Zone Resources**: `Include` → `Specific zone` → **selecione seu domínio**
+5. *(Opcional)* Em **Client IP Address Filtering**, adicione o IP da sua VPS para restringir o uso do token apenas a ela — isso impede que o token funcione de qualquer outro lugar
+6. Clique em **"Continue to summary"** → **"Create Token"**
+7. **Copie o token gerado** — ele só aparece uma vez! Se perder, terá que criar outro
+8. Cole no seu `.env`:
+   ```bash
+   CF_DNS_API_TOKEN=o_token_que_voce_copiou
+   ```
 
-> O Traefik usa esse token para criar registros DNS temporários e provar ao Let's Encrypt que você controla o domínio — sem precisar abrir nenhuma porta extra.
+> **Por que esse token é necessário?** O Traefik usa o método DNS-01 challenge do Let's Encrypt. Ele cria automaticamente um registro DNS `_acme-challenge.seudominio.com` via API da Cloudflare para provar que você controla o domínio. Isso permite gerar certificados SSL wildcard (`*.seudominio.com`) sem precisar abrir portas extras.
 
 ---
 
