@@ -48,6 +48,7 @@ services:
       # Porta 8080 (dashboard) NÃO exposta externamente — acesso via túnel ou VPN
     environment:
       - CF_DNS_API_TOKEN=${CF_DNS_API_TOKEN}   # Cloudflare API token para DNS challenge
+      - DOCKER_API_VERSION=1.45                # Forçar versão compatível da API Docker
     volumes:
       - /etc/localtime:/etc/localtime:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro
