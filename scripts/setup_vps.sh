@@ -59,25 +59,52 @@ DEBIAN_FRONTEND=noninteractive apt-get upgrade -y -qq
 ok "Sistema atualizado."
 
 # =============================================================
-# ETAPA 2 — Instalar dependências essenciais
+# ETAPA 2a — Corrigir dependências quebradas
 # =============================================================
-step "ETAPA 2/10 — Instalando dependências essenciais"
+step "ETAPA 2a/11 — Corrigindo dependências quebradas"
+info "Verificando e corrigindo pacotes quebrados..."
+apt-get check 2>/dev/null || true
+info "Limpando cache do apt..."
+apt-get clean
+apt-get autoclean
+info "Corrigindo dependências quebradas..."
+dpkg --configure -a
+apt-get install -f -y
+apt-get autoremove -y
+apt-get update -qq
+ok "Sistema limpo e dependências corrigidas."
 
-PACKAGES=(
+# =============================================================
+# ETAPA 2b — Instalar dependências essenciais
+# =============================================================
+step "ETAPA 2b/11 — Instalando dependências essenciais"
+
+# Instalar em grupos menores para evitar conflitos
+BASIC_PACKAGES=(
   curl wget vim htop nano
-  ufw fail2ban
-  ca-certificates gnupg
-  lsb-release
-  iptables-persistent
-  unzip zip
-  jq
-  net-tools
-  dnsutils
+  ca-certificates gnupg lsb-release
+  unzip zip jq
 )
 
-info "Instalando: ${PACKAGES[*]}"
-DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "${PACKAGES[@]}"
-ok "Dependências instaladas."
+NETWORK_PACKAGES=(
+  net-tools dnsutils
+)
+
+SECURITY_PACKAGES=(
+  ufw fail2ban iptables-persistent
+)
+
+info "Instalando ferramentas básicas: ${BASIC_PACKAGES[*]}"
+DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "${BASIC_PACKAGES[@]}"
+ok "Ferramentas básicas instaladas."
+
+info "Instalando ferramentas de rede: ${NETWORK_PACKAGES[*]}"
+DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "${NETWORK_PACKAGES[@]}"
+ok "Ferramentas de rede instaladas."
+
+info "Instalando ferramentas de segurança: ${SECURITY_PACKAGES[*]}"
+DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "${SECURITY_PACKAGES[@]}"
+ok "Ferramentas de segurança instaladas."
 
 # =============================================================
 # ETAPA 3 — Instalar Docker
