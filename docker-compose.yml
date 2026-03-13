@@ -2,30 +2,35 @@ version: "3.9"
 
 # =============================================================
 #  VPS STACK — Infraestrutura base
-#  Serviços: Traefik · PostgreSQL · Redis · Metabase · Grafana
-#            Loki · Promtail
+#  Arquitetura: docs/ARCHITECTURE.md
+#
+#  Serviços: Traefik · Metabase (banco próprio) · Grafana
+#            Loki · Promtail · Redis
+#
+#  Sem Postgres global — cada app sobe seu próprio banco
 # =============================================================
 
 networks:
-  # Rede pública — só Traefik fica aqui
-  proxy:
+  # Roteamento externo — Traefik + serviços com rota pública
+  traefik_public:
     external: true
 
-  # Rede interna — todos os serviços se comunicam aqui
-  internal:
-    internal: true
+  # Comunicação interna — Redis, Loki, Promtail, Grafana, apps
+  infra_internal:
+    driver: bridge
 
-  # Rede de observabilidade — Grafana, Loki, Promtail
-  observability:
-    internal: true
+  # Metabase conecta aos bancos das apps (read-only)
+  # Apps conectam o Postgres delas a esta rede
+  infra_data:
+    driver: bridge
 
 volumes:
-  postgres_data:
-  redis_data:
+  metabase_db_data:
   metabase_data:
   grafana_data:
   loki_data:
   traefik_certs:
+  redis_data:
 
 # =============================================================
 services:
@@ -40,14 +45,13 @@ services:
     security_opt:
       - no-new-privileges:true
     networks:
-      - proxy
-      - internal
+      - traefik_public
     ports:
-      - "80:80"      # HTTP  (redireciona para HTTPS)
-      - "443:443"    # HTTPS
-      # Porta 8080 (dashboard) NÃO exposta externamente — acesso via túnel ou VPN
+      - "80:80"
+      - "443:443"
     environment:
-      - CF_DNS_API_TOKEN=${CF_DNS_API_TOKEN}   # Cloudflare API token para DNS challenge
+      - CF_DNS_API_TOKEN=${CF_DNS_API_TOKEN}
+      - LETSENCRYPT_EMAIL=${LETSENCRYPT_EMAIL}
     volumes:
       - /etc/localtime:/etc/localtime:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro
@@ -56,9 +60,7 @@ services:
       - ./traefik/dynamic.yml:/dynamic.yml:ro
     labels:
       - "traefik.enable=true"
-      # Middleware de auth definido aqui — lê do .env
       - "traefik.http.middlewares.auth.basicauth.users=${TRAEFIK_DASHBOARD_AUTH}"
-      # Router do dashboard usando auth@docker (não mais auth@file)
       - "traefik.http.routers.traefik-dashboard.rule=Host(`traefik.${DOMAIN}`)"
       - "traefik.http.routers.traefik-dashboard.entrypoints=websecure"
       - "traefik.http.routers.traefik-dashboard.tls.certresolver=cloudflare"
@@ -71,49 +73,107 @@ services:
       retries: 3
 
   # -----------------------------------------------------------
-  # POSTGRESQL — Banco de dados principal (multi-schema)
+  # POSTGRES — Banco exclusivo do Metabase
   # -----------------------------------------------------------
-  postgres:
+  metabase-db:
     image: postgres:16-alpine
-    container_name: postgres
+    container_name: metabase-db
     restart: unless-stopped
     networks:
-      - internal
-    # PORTA NÃO EXPOSTA — acesso apenas pela rede interna Docker
-    # Para acesso local use: docker exec -it postgres psql -U $POSTGRES_USER
+      - infra_internal
     environment:
-      POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_DB: ${METABASE_DB:-metabase}
+      POSTGRES_USER: ${METABASE_DB_USER:-metabase_user}
+      POSTGRES_PASSWORD: ${METABASE_DB_PASSWORD}
       PGDATA: /var/lib/postgresql/data/pgdata
-      # Variáveis usadas pelo script 02_create_services.sh
-      METABASE_DB: ${METABASE_DB}
-      METABASE_DB_USER: ${METABASE_DB_USER}
-      METABASE_DB_PASSWORD: ${METABASE_DB_PASSWORD}
-      GRAFANA_DB: ${GRAFANA_DB}
-      GRAFANA_DB_USER: ${GRAFANA_DB_USER}
-      GRAFANA_DB_PASSWORD: ${GRAFANA_DB_PASSWORD}
     volumes:
-      - postgres_data:/var/lib/postgresql/data
-      - ./postgres/init:/docker-entrypoint-initdb.d:ro   # Scripts executados na criação
-      - ./scripts:/scripts:ro
+      - metabase_db_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      test: ["CMD-SHELL", "pg_isready -U ${METABASE_DB_USER:-metabase_user} -d ${METABASE_DB:-metabase}"]
       interval: 10s
       timeout: 5s
       retries: 5
-    shm_size: 256mb
+    shm_size: 128mb
 
   # -----------------------------------------------------------
-  # REDIS — Cache e filas
+  # METABASE — BI (leitura dos bancos das apps via infra_data)
+  # -----------------------------------------------------------
+  metabase:
+    image: metabase/metabase:latest
+    container_name: metabase
+    restart: unless-stopped
+    networks:
+      - traefik_public
+      - infra_internal
+      - infra_data
+    environment:
+      MB_DB_TYPE: postgres
+      MB_DB_DBNAME: ${METABASE_DB:-metabase}
+      MB_DB_PORT: 5432
+      MB_DB_USER: ${METABASE_DB_USER:-metabase_user}
+      MB_DB_PASS: ${METABASE_DB_PASSWORD}
+      MB_DB_HOST: metabase-db
+      MB_SITE_URL: https://metabase.${DOMAIN}
+      JAVA_TIMEZONE: America/Sao_Paulo
+    volumes:
+      - metabase_data:/metabase-data
+    depends_on:
+      metabase-db:
+        condition: service_healthy
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.metabase.rule=Host(`metabase.${DOMAIN}`)"
+      - "traefik.http.routers.metabase.entrypoints=websecure"
+      - "traefik.http.routers.metabase.tls.certresolver=cloudflare"
+      - "traefik.http.services.metabase.loadbalancer.server.port=3000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+  # -----------------------------------------------------------
+  # GRAFANA — Logs e métricas (usa SQLite interno)
+  # -----------------------------------------------------------
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    restart: unless-stopped
+    networks:
+      - traefik_public
+      - infra_internal
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_USER}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD}
+      GF_SERVER_ROOT_URL: https://grafana.${DOMAIN}
+      GF_SERVER_DOMAIN: grafana.${DOMAIN}
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_LOG_MODE: console
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.grafana.rule=Host(`grafana.${DOMAIN}`)"
+      - "traefik.http.routers.grafana.entrypoints=websecure"
+      - "traefik.http.routers.grafana.tls.certresolver=cloudflare"
+      - "traefik.http.services.grafana.loadbalancer.server.port=3000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  # -----------------------------------------------------------
+  # REDIS — Cache/filas compartilhado (ver redis/databases.md)
   # -----------------------------------------------------------
   redis:
     image: redis:7-alpine
     container_name: redis
     restart: unless-stopped
     networks:
-      - internal
-    # PORTA NÃO EXPOSTA externamente
+      - infra_internal
     command: >
       redis-server
       --requirepass ${REDIS_PASSWORD}
@@ -130,84 +190,6 @@ services:
       retries: 3
 
   # -----------------------------------------------------------
-  # METABASE — Business Intelligence / dashboards
-  # -----------------------------------------------------------
-  metabase:
-    image: metabase/metabase:latest
-    container_name: metabase
-    restart: unless-stopped
-    networks:
-      - proxy
-      - internal
-    environment:
-      MB_DB_TYPE: postgres
-      MB_DB_DBNAME: ${METABASE_DB}
-      MB_DB_PORT: 5432
-      MB_DB_USER: ${METABASE_DB_USER}
-      MB_DB_PASS: ${METABASE_DB_PASSWORD}
-      MB_DB_HOST: postgres
-      MB_SITE_URL: https://metabase.${DOMAIN}
-      JAVA_TIMEZONE: America/Sao_Paulo
-    volumes:
-      - metabase_data:/metabase-data
-    depends_on:
-      postgres:
-        condition: service_healthy
-    labels:
-      - "traefik.enable=true"
-      - "traefik.http.routers.metabase.rule=Host(`metabase.${DOMAIN}`)"
-      - "traefik.http.routers.metabase.entrypoints=websecure"
-      - "traefik.http.routers.metabase.tls.certresolver=cloudflare"
-      - "traefik.http.services.metabase.loadbalancer.server.port=3000"
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
-      start_period: 60s
-
-  # -----------------------------------------------------------
-  # GRAFANA — Métricas e observabilidade
-  # -----------------------------------------------------------
-  grafana:
-    image: grafana/grafana:latest
-    container_name: grafana
-    restart: unless-stopped
-    networks:
-      - proxy
-      - internal
-      - observability
-    environment:
-      GF_SECURITY_ADMIN_USER: ${GRAFANA_USER}
-      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD}
-      GF_SERVER_ROOT_URL: https://grafana.${DOMAIN}
-      GF_SERVER_DOMAIN: grafana.${DOMAIN}
-      GF_DATABASE_TYPE: postgres
-      GF_DATABASE_HOST: postgres:5432
-      GF_DATABASE_NAME: ${GRAFANA_DB}
-      GF_DATABASE_USER: ${GRAFANA_DB_USER}
-      GF_DATABASE_PASSWORD: ${GRAFANA_DB_PASSWORD}
-      GF_ANALYTICS_REPORTING_ENABLED: "false"
-      GF_LOG_MODE: console
-    volumes:
-      - grafana_data:/var/lib/grafana
-      - ./grafana/provisioning:/etc/grafana/provisioning:ro
-    depends_on:
-      postgres:
-        condition: service_healthy
-    labels:
-      - "traefik.enable=true"
-      - "traefik.http.routers.grafana.rule=Host(`grafana.${DOMAIN}`)"
-      - "traefik.http.routers.grafana.entrypoints=websecure"
-      - "traefik.http.routers.grafana.tls.certresolver=cloudflare"
-      - "traefik.http.services.grafana.loadbalancer.server.port=3000"
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-
-  # -----------------------------------------------------------
   # LOKI — Agregação de logs
   # -----------------------------------------------------------
   loki:
@@ -215,9 +197,7 @@ services:
     container_name: loki
     restart: unless-stopped
     networks:
-      - observability
-      - internal
-    # PORTA NÃO EXPOSTA — acesso apenas interno (Grafana + Promtail)
+      - infra_internal
     command: -config.file=/etc/loki/loki.yml
     volumes:
       - loki_data:/loki
@@ -236,12 +216,11 @@ services:
     container_name: promtail
     restart: unless-stopped
     networks:
-      - observability
-      - internal
+      - infra_internal
     volumes:
-      - /var/log:/var/log:ro                          # Logs do host
-      - /var/lib/docker/containers:/var/lib/docker/containers:ro  # Logs dos containers
-      - /var/run/docker.sock:/var/run/docker.sock     # Socket Docker para autodiscovery
+      - /var/log:/var/log:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /var/run/docker.sock:/var/run/docker.sock
       - ./promtail/promtail.yml:/etc/promtail/promtail.yml:ro
     depends_on:
       - loki

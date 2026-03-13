@@ -42,7 +42,7 @@ entryPoints:
 certificatesResolvers:
   cloudflare:
     acme:
-      email: arielnnogueira@hotmail.com
+      email: "{{ env \"LETSENCRYPT_EMAIL\" }}"
       storage: /certs/acme.json
       caServer: https://acme-v02.api.letsencrypt.org/directory
       dnsChallenge:
@@ -55,7 +55,7 @@ providers:
   docker:
     endpoint: "unix:///var/run/docker.sock"
     exposedByDefault: false         # Serviços precisam de label traefik.enable=true
-    network: proxy
+    network: traefik_public
   file:
     filename: /dynamic.yml
     watch: true

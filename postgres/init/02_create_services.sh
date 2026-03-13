@@ -66,11 +66,6 @@ EOSQL
 
 echo "  ✅ Grafana OK"
 
-# =============================================================
-# Schema de exemplo no banco principal
-# =============================================================
-psql -v ON_ERROR_STOP=1 --username "$DB_USER" --dbname "${POSTGRES_DB:-main}" <<-EOSQL
-  CREATE SCHEMA IF NOT EXISTS app_example;
-EOSQL
+
 
 echo "🎉 Todos os bancos e usuários criados com sucesso!"

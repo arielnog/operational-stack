@@ -34,8 +34,7 @@ vps-stack/
 └── scripts/
     ├── setup_vps.sh                # ① Setup inicial da VPS (rodar 1x)
     ├── setup_git.sh                # ② Instalação e configuração do Git (opcional)
-    ├── setup_firewall.sh           # ③ Chamado automaticamente pelo setup_vps.sh
-    └── create_app_user.sh          # ④ Criar schema/usuário no Postgres por app
+    └── setup_firewall.sh           # ③ Chamado automaticamente pelo setup_vps.sh
 ```
 
 ---
@@ -78,31 +77,12 @@ Metabase  Grafana   Suas Apps    (futuras apps)
 |--------|-------------|-----------|
 | `setup_vps.sh` | **Primeira execução** | Setup base da VPS: Docker, dependências, firewall, fail2ban |
 | `setup_git.sh` | **Opcional** | Instala e configura Git com identidade global |
-| `setup_ssh.sh` | **Recomendado** | Hardening completo do SSH: porta, algoritmos, usuário dedicado |
-| `create_app_user.sh` | **Por aplicação** | Cria usuário/banco PostgreSQL isolado para cada app |
+| `setup_firewall.sh` | Chamado pelo setup_vps | Configura UFW e iptables |
 
 **Ordem recomendada:**
 1. `setup_vps.sh` ← sempre primeiro
 2. `setup_git.sh` ← se precisar do Git
-3. `setup_ssh.sh` ← para máxima segurança SSH
-4. configurar .env e subir a stack
-5. `create_app_user.sh` ← para cada aplicação
-
-### Como usar o `setup_ssh.sh`
-
-O script `setup_ssh.sh` realiza o hardening do SSH, incluindo:
-- Alteração da porta padrão
-- Restrição de algoritmos inseguros
-- Criação de usuário dedicado para acesso
-- Desabilitação de login por senha
-
-Execute como root:
-
-```bash
-sudo bash scripts/setup_ssh.sh
-```
-
-Siga as instruções interativas para configurar o SSH de forma segura.
+3. Configurar .env e subir a stack
 
 ---
 
@@ -216,6 +196,9 @@ POSTGRES_DB=main
 # Redis
 REDIS_PASSWORD=TROQUE_POR_SENHA_FORTE
 
+# Let's Encrypt (e-mail para alertas de expiração)
+LETSENCRYPT_EMAIL=seu@email.com
+
 # Metabase (usuário dedicado no Postgres)
 METABASE_DB=metabase
 METABASE_DB_USER=metabase_user
@@ -237,13 +220,13 @@ TRAEFIK_DASHBOARD_AUTH=usuario:$$apr1$$hash$$aqui
 
 ### FASE 5 — Configurar o Traefik
 
-**5a. Editar e-mail para o Let's Encrypt:**
+**5a. Configurar e-mail do Let's Encrypt:**
+
+No arquivo `.env`, defina a variável `LETSENCRYPT_EMAIL` com seu e-mail real. O Let's Encrypt envia alertas de expiração de certificados para esse endereço:
 
 ```bash
-vim traefik/traefik.yml
+LETSENCRYPT_EMAIL=seu@email.com
 ```
-
-Procure a linha com `seu@email.com` e substitua pelo seu e-mail real. O Let's Encrypt envia alertas de expiração para esse endereço.
 
 **5b. Obter o token da Cloudflare:**
 
@@ -334,29 +317,6 @@ Após tudo subir (aguarde ~2 minutos para o SSL ser emitido):
 | Traefik dashboard | `https://traefik.seudominio.com` | basic auth do `.env` |
 | Metabase | `https://metabase.seudominio.com` | criado no primeiro acesso |
 | Grafana | `https://grafana.seudominio.com` | admin / senha do `.env` |
-
----
-
-### FASE 9 — Criar usuários para suas aplicações
-
-Para cada nova aplicação Node ou PHP, crie um schema e usuário isolado no Postgres:
-
-```bash
-./scripts/create_app_user.sh nome_da_app SenhaForteAqui123!
-```
-
-Exemplo:
-
-```bash
-./scripts/create_app_user.sh minha_api MinhaApiSenha2024!
-
-# Saída:
-# ✅ Schema e usuário criados com sucesso!
-# String de conexão:
-# postgresql://minha_api_user:MinhaApiSenha2024!@postgres:5432/main?search_path=minha_api
-```
-
-Use essa string de conexão nas variáveis de ambiente da sua aplicação.
 
 ---
 

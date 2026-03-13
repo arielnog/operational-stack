@@ -1,17 +1,24 @@
-version: "3.9"
-
 # =============================================================
-#  Exemplo: docker-compose de uma aplicação Node/PHP
-#  que se conecta à infraestrutura base (vps-stack)
+#  Exemplo: docker-compose de uma aplicação com banco próprio
 #
-#  As redes 'proxy' e 'internal' são externas (criadas pelo vps-stack)
+#  Arquitetura: docs/ARCHITECTURE.md
+#  - App em traefik_public + infra_internal
+#  - Banco em minha_api_net (app) + infra_data (read-only p/ Metabase)
+#  - Redis compartilhado via infra_internal (ver redis/databases.md)
+#
+#  IMPORTANTE: Crie o usuário *_reader no init do Postgres para o Metabase.
+#  Ver examples/postgres-init-reader.sh
 # =============================================================
 
 networks:
-  proxy:
-    external: true     # Rede do Traefik
-  internal:
-    external: true     # Rede interna — acesso ao Postgres e Redis
+  traefik_public:
+    external: true
+  infra_internal:
+    external: true
+  infra_data:
+    external: true
+  minha_api_net:
+    driver: bridge
 
 services:
   minha-api:
@@ -19,13 +26,16 @@ services:
     container_name: minha-api
     restart: unless-stopped
     networks:
-      - proxy          # Para o Traefik rotear
-      - internal       # Para acessar Postgres, Redis
+      - traefik_public
+      - infra_internal
+      - minha_api_net
     environment:
-      # String de conexão usando o schema dedicado
-      DATABASE_URL: postgresql://minha_api_user:SENHA@postgres:5432/main?search_path=minha_api
-      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
+      DATABASE_URL: postgresql://minha_api_user:SENHA_AQUI@minha-api-db:5432/minha_api
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/1
       NODE_ENV: production
+    depends_on:
+      minha-api-db:
+        condition: service_healthy
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.minha-api.rule=Host(`api.seudominio.com`)"
@@ -33,7 +43,33 @@ services:
       - "traefik.http.routers.minha-api.tls.certresolver=cloudflare"
       - "traefik.http.routers.minha-api.middlewares=secureApp@file"
       - "traefik.http.services.minha-api.loadbalancer.server.port=3000"
-      # Labels para o Promtail identificar os logs
       - "logging=promtail"
       - "logging_jobname=minha-api"
-    # NÃO expor porta diretamente — o Traefik cuida disso
+
+  # Postgres exclusivo desta app — em duas redes:
+  # minha_api_net: acesso total da app
+  # infra_data: Metabase conecta com usuário read-only (minha_api_reader)
+  minha-api-db:
+    image: postgres:16-alpine
+    container_name: minha-api-db
+    restart: unless-stopped
+    networks:
+      - minha_api_net
+      - infra_data
+    environment:
+      POSTGRES_DB: minha_api
+      POSTGRES_USER: minha_api_user
+      POSTGRES_PASSWORD: SENHA_AQUI
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - minha_api_data:/var/lib/postgresql/data
+      - ./postgres-init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U minha_api_user -d minha_api"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    shm_size: 128mb
+
+volumes:
+  minha_api_data:
