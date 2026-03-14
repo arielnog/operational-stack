@@ -17,14 +17,12 @@ networks:
 
   # Comunicação interna — Redis, Loki, Promtail, Grafana, apps
   infra_internal:
-    name: infra_internal
-    driver: bridge
+    external: true
 
   # Metabase conecta aos bancos das apps (read-only)
   # Apps conectam o Postgres delas a esta rede
-  infra_data:
-    name: infra_data
-    driver: bridge
+  infra_data: 
+    external: true
 
 volumes:
   metabase_db_data:
