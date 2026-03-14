@@ -42,7 +42,7 @@ entryPoints:
 certificatesResolvers:
   cloudflare:
     acme:
-      email: "{{ env \"LETSENCRYPT_EMAIL\" }}"
+      # E-mail via TRAEFIK_CERTIFICATESRESOLVERS_CLOUDFLARE_ACME_EMAIL (templating não funciona em config estática)
       storage: /certs/acme.json
       caServer: https://acme-v02.api.letsencrypt.org/directory
       dnsChallenge:
