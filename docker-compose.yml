@@ -82,14 +82,14 @@ services:
     networks:
       - infra_internal
     environment:
-      POSTGRES_DB: ${METABASE_DB:-metabase}
-      POSTGRES_USER: ${METABASE_DB_USER:-metabase_user}
+      POSTGRES_DB: ${METABASE_DB}
+      POSTGRES_USER: ${METABASE_DB_USER}
       POSTGRES_PASSWORD: ${METABASE_DB_PASSWORD}
       PGDATA: /var/lib/postgresql/data/pgdata
     volumes:
       - metabase_db_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${METABASE_DB_USER:-metabase_user} -d ${METABASE_DB:-metabase}"]
+      test: ["CMD-SHELL", "pg_isready -U ${METABASE_DB_USER} -d ${METABASE_DB}"]
       interval: 10s
       timeout: 5s
       retries: 5
