@@ -1,13 +1,15 @@
 # loki.yml
 auth_enabled: false
 
+target: all
+
 server:
   http_listen_port: 3100
   grpc_listen_port: 9096
   log_level: warn
 
 common:
-  instance_addr: 0.0.0.0   # ✅ era 127.0.0.1, problemático em container
+  instance_addr: ${HOSTNAME}  # ✅ IP do container
   path_prefix: /loki
   storage:
     filesystem:
@@ -18,13 +20,6 @@ common:
     kvstore:
       store: inmemory
 
-query_range:
-  results_cache:
-    cache:
-      embedded_cache:
-        enabled: true
-        max_size_mb: 100
-
 schema_config:
   configs:
     - from: 2024-01-01
@@ -34,6 +29,13 @@ schema_config:
       index:
         prefix: index_
         period: 24h
+
+query_range:
+  results_cache:
+    cache:
+      embedded_cache:
+        enabled: true
+        max_size_mb: 100
 
 limits_config:
   retention_period: 720h
@@ -46,9 +48,6 @@ compactor:
   retention_delete_delay: 2h
   retention_delete_worker_count: 150
   delete_request_store: filesystem
-
-ruler:
-  alertmanager_url: http://localhost:9093
 
 analytics:
   reporting_enabled: false
