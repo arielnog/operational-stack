@@ -11,7 +11,6 @@ clients:
   - url: http://loki:3100/loki/api/v1/push
 
 scrape_configs:
-  # ── Logs de todos os containers Docker (autodiscovery) ──────────────
   - job_name: docker
     docker_sd_configs:
       - host: unix:///var/run/docker.sock
@@ -26,10 +25,13 @@ scrape_configs:
         target_label: 'service'
       - source_labels: ['__meta_docker_container_label_com_docker_compose_project']
         target_label: 'project'
-      # ✅ Filtrar APÓS o label 'container' ter sido criado
       - source_labels: ['container']
         regex: '.+'
         action: keep
+      # ✅ necessário: mapeia o path real dos logs JSON do Docker
+      - source_labels: ['__meta_docker_container_id']
+        target_label: '__path__'
+        replacement: '/var/lib/docker/containers/$1/$1-json.log'
     # ✅ Sem pipeline_stages JSON aqui — logs de container são texto puro.
     # Se suas apps logam JSON estruturado, adicione por job separado.
 

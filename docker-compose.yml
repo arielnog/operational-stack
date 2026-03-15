@@ -193,7 +193,7 @@ services:
   # LOKI — Agregação de logs
   # -----------------------------------------------------------
   loki:
-    image: grafana/loki:latest
+    image: grafana/loki:3.6   # ✅ evite :latest em prod
     container_name: loki
     restart: unless-stopped
     networks:
@@ -204,15 +204,16 @@ services:
       - ./loki/loki.yml:/etc/loki/loki.yml:ro
     healthcheck:
       test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3100/ready"]
-      interval: 30s
+      interval: 10s      # ✅ mais frequente para o depends_on funcionar rápido
       timeout: 5s
-      retries: 3
+      retries: 5
+      start_period: 30s
 
   # -----------------------------------------------------------
   # PROMTAIL — Coleta e envia logs para o Loki
   # -----------------------------------------------------------
   promtail:
-    image: grafana/promtail:latest
+    image: grafana/promtail:3.6   # ✅ mesma versão do Loki
     container_name: promtail
     restart: unless-stopped
     networks:
@@ -220,7 +221,9 @@ services:
     volumes:
       - /var/log:/var/log:ro
       - /var/lib/docker/containers:/var/lib/docker/containers:ro
-      - /var/run/docker.sock:/var/run/docker.sock
+      - /var/run/docker.sock:/var/run/docker.sock:ro  # ✅ read-only é suficiente
       - ./promtail/promtail.yml:/etc/promtail/promtail.yml:ro
+    command: -config.file=/etc/promtail/promtail.yml
     depends_on:
-      - loki
+      loki:
+        condition: service_healthy
