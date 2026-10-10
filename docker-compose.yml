@@ -31,6 +31,7 @@ volumes:
   loki_data:
   traefik_certs:
   redis_data:
+  rabbitmq_data:
 
 # =============================================================
 services:
@@ -193,6 +194,31 @@ services:
       interval: 10s
       timeout: 5s
       retries: 3
+
+  # -----------------------------------------------------------
+  # RABBITMQ — Mensageria compartilhada (ver rabbitmq/README.md)
+  # Um vhost e um usuário por app. hostname fixo: o RabbitMQ guarda os
+  # dados pelo nome do nó, e recriar o container com outro hostname
+  # perderia filas e mensagens. Painel (15672) só na rede interna.
+  # -----------------------------------------------------------
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    container_name: rabbitmq
+    hostname: rabbitmq
+    restart: unless-stopped
+    networks:
+      - infra_internal
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_ADMIN_USER}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_ADMIN_PASSWORD}
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
 
   # -----------------------------------------------------------
   # LOKI — Agregação de logs

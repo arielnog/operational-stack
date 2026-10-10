@@ -61,7 +61,7 @@ Metabase  Grafana   Suas Apps    (futuras apps)
             ▼
 ┌──────────────────────────────────────────────────────────────┐
 │  REDE INTERNA (não acessível externamente)                   │
-│  Redis · Loki · Promtail  (cada app sobe o próprio Postgres)  │
+│  Redis · RabbitMQ · Loki · Promtail  (Postgres é por app)    │
 └──────────────────────────────────────────────────────────────┘
 ```
 
@@ -288,6 +288,7 @@ NAME         IMAGE                    STATUS
 traefik      traefik:v3.1             running (healthy)
 metabase-db  postgres:16-alpine       running (healthy)
 redis        redis:7-alpine           running (healthy)
+rabbitmq     rabbitmq:3.13-management running (healthy)
 metabase     metabase/metabase        running (healthy)
 grafana      grafana/grafana          running (healthy)
 loki         grafana/loki             running (healthy)
@@ -342,6 +343,7 @@ docker compose -f /opt/minha-api/docker-compose.yml up -d
 | 443 | ✅ Aberta | HTTPS via Traefik |
 | 5432 | ❌ Fechada | PostgreSQL das apps — só via rede Docker |
 | 6379 | ❌ Fechada | Redis — só via rede Docker |
+| 5672 / 15672 | ❌ Fechada | RabbitMQ (AMQP e painel) — só via rede Docker |
 | 3100 | ❌ Fechada | Loki — só via rede Docker |
 | 8080 | ❌ Fechada | Traefik dashboard — só via HTTPS |
 
