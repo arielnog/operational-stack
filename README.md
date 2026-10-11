@@ -187,6 +187,10 @@ CF_DNS_API_TOKEN=seu_token_cloudflare_aqui
 # Redis
 REDIS_PASSWORD=TROQUE_POR_SENHA_FORTE
 
+# RabbitMQ (administrador; cada app tem vhost e usuário próprios — ver rabbitmq/README.md)
+RABBITMQ_ADMIN_USER=admin
+RABBITMQ_ADMIN_PASSWORD=TROQUE_POR_SENHA_FORTE
+
 # Let's Encrypt (e-mail para alertas de expiração)
 LETSENCRYPT_EMAIL=seu@email.com
 
@@ -322,6 +326,7 @@ Pontos importantes no compose da app (detalhes em `docs/ARCHITECTURE.md`):
 - App nas redes `traefik_public` (só se tiver rota pública) e `infra_internal` (Redis, Loki), ambas `external: true`
 - Postgres próprio da app, nas redes `<app>_net` e `infra_data`, com usuário `<app>_reader` para o Metabase (`examples/postgres-init-reader.sh`)
 - Reserve um DB number do Redis em `redis/databases.md`
+- Se a app usa mensageria, crie o vhost e o usuário dela no RabbitMQ e registre em `rabbitmq/README.md`
 - Adicione as labels do Traefik para o subdomínio
 - **Não declare `ports:`** — o Traefik faz o roteamento
 
