@@ -43,6 +43,16 @@ Prompt compilado com todas as decisões aprovadas para geração ou regeneraçã
 | Cache | Toda chave de cache **precisa de TTL** (não há LRU para limpar o que ficou sem TTL) |
 | Redis dedicado | Apenas se a app exigir configuração incompatível (ex.: cache que dependa de LRU, outro `maxmemory`) |
 
+### RabbitMQ
+
+| Decisão | Detalhe |
+|---------|---------|
+| Compartilhado | Um único RabbitMQ por toda a VPS, na infra |
+| Isolamento | Por vhost: um vhost e um usuário por app, com permissão só no seu vhost |
+| Documentação | `rabbitmq/README.md` no repositório |
+| Painel | Só na rede interna (sem rota no Traefik); acesso por túnel SSH |
+| Persistência | Volume `rabbitmq_data` e `hostname` fixo (o nome do nó define onde ficam os dados) |
+
 ### Metabase
 
 | Decisão | Detalhe |
@@ -59,7 +69,7 @@ Prompt compilado com todas as decisões aprovadas para geração ou regeneraçã
 | Rede | Quem entra | Para quê |
 |------|------------|----------|
 | **traefik_public** | traefik, metabase, grafana, apps com rota pública | Roteamento externo via Traefik |
-| **infra_internal** | loki, promtail, grafana, redis, apps pessoais | Comunicação interna da infra, acesso ao Redis |
+| **infra_internal** | loki, promtail, grafana, redis, rabbitmq, apps pessoais | Comunicação interna da infra, acesso ao Redis e ao RabbitMQ |
 | **infra_data** | metabase, bancos das apps (somente read-only) | Metabase lê os bancos sem porta exposta |
 | ***_net** (por app) | app + banco dela | Comunicação interna exclusiva da app |
 
@@ -67,7 +77,7 @@ Prompt compilado com todas as decisões aprovadas para geração ou regeneraçã
 
 1. **A app nunca entra na infra_data** — só o banco dela entra
 2. **Banco de cada app** fica em duas redes: `*_net` (acesso total da app) e `infra_data` (read-only para Metabase)
-3. **Redis** fica em `infra_internal` — apps acessam por lá
+3. **Redis** e **RabbitMQ** ficam em `infra_internal` — apps acessam por lá
 4. **Nenhum banco** tem porta exposta para o host
 
 ---
