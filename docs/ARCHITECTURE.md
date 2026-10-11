@@ -39,7 +39,9 @@ Prompt compilado com todas as decisões aprovadas para geração ou regeneraçã
 | Compartilhado | Um único Redis por toda a VPS, na infra |
 | Isolamento | Por database number (DB 0 reservado, cada app usa um número dedicado) |
 | Documentação | `redis/databases.md` no repositório |
-| Redis dedicado | Apenas se a app exigir `noeviction` ou configuração incompatível |
+| Política de memória | `noeviction` + AOF (`appendonly yes`): com a memória cheia o Redis recusa escritas em vez de apagar chaves, então filas e índices nunca somem em silêncio |
+| Cache | Toda chave de cache **precisa de TTL** (não há LRU para limpar o que ficou sem TTL) |
+| Redis dedicado | Apenas se a app exigir configuração incompatível (ex.: cache que dependa de LRU, outro `maxmemory`) |
 
 ### Metabase
 

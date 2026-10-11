@@ -1,6 +1,6 @@
 # VPS Stack — Infraestrutura Base
 
-Stack completa de infraestrutura para VPS com Docker, pronta para hospedar aplicações Node/PHP com banco de dados compartilhado, observabilidade e proxy reverso seguro.
+Stack completa de infraestrutura para VPS com Docker, pronta para hospedar aplicações Node/PHP com banco de dados próprio por app, Redis compartilhado, observabilidade e proxy reverso seguro.
 
 ---
 
@@ -16,10 +16,6 @@ vps-stack/
 │   ├── traefik.yml                 # Config estática (entrypoints, certificados)
 │   └── dynamic.yml                 # Middlewares, TLS, headers de segurança
 │
-├── postgres/
-│   └── init/
-│       └── 01_init.sql             # Criação de bancos e usuários iniciais
-│
 ├── loki/
 │   └── loki.yml                    # Agregador de logs
 │
@@ -29,7 +25,7 @@ vps-stack/
 ├── grafana/
 │   └── provisioning/
 │       └── datasources/
-│           └── datasources.yml     # Loki + PostgreSQL pré-configurados
+│           └── datasources.yml     # Loki pré-configurado
 │
 └── scripts/
     ├── setup_vps.sh                # ① Setup inicial da VPS (rodar 1x)
@@ -52,7 +48,7 @@ Internet
    │ 80 / 443
    ▼
 ┌──────────────────────────────────────────────────────────────┐
-│  TRAEFIK (proxy reverso)                    rede: proxy      │
+│  TRAEFIK (proxy reverso)           rede: traefik_public      │
 │  • SSL automático via Let's Encrypt + Cloudflare             │
 │  • Roteia por subdomínio → container certo                   │
 │  • Rate limiting, headers de segurança, TLS 1.2+             │
@@ -65,7 +61,7 @@ Metabase  Grafana   Suas Apps    (futuras apps)
             ▼
 ┌──────────────────────────────────────────────────────────────┐
 │  REDE INTERNA (não acessível externamente)                   │
-│  PostgreSQL · Redis · Loki · Promtail                        │
+│  Redis · Loki · Promtail  (cada app sobe o próprio Postgres)  │
 └──────────────────────────────────────────────────────────────┘
 ```
 
@@ -159,7 +155,7 @@ O script vai te guiar interativamente por 9 etapas:
 | 2 | Instala: curl, wget, vim, htop, jq, dnsutils, unzip... |
 | 3 | Instala Docker + Docker Compose plugin + pergunta usuário do grupo docker |
 | 4 | Configura `/etc/docker/daemon.json` (logs, live-restore) |
-| 5 | Cria a rede Docker `proxy` (usada pelo Traefik) |
+| 5 | Cria as redes Docker `traefik_public`, `infra_internal` e `infra_data` |
 | 6 | Instala Fail2Ban — bloqueia IPs após 3 tentativas SSH falhas |
 | 7 | Pergunta se quer desabilitar login SSH por senha |
 | 8 | Cria `/var/log/traefik` e `/etc/iptables` |
@@ -188,18 +184,13 @@ DOMAIN=seudominio.com
 # Token da Cloudflare (veja como obter abaixo)
 CF_DNS_API_TOKEN=seu_token_cloudflare_aqui
 
-# PostgreSQL — superusuário
-POSTGRES_USER=admin
-POSTGRES_PASSWORD=TROQUE_POR_SENHA_FORTE
-POSTGRES_DB=main
-
 # Redis
 REDIS_PASSWORD=TROQUE_POR_SENHA_FORTE
 
 # Let's Encrypt (e-mail para alertas de expiração)
 LETSENCRYPT_EMAIL=seu@email.com
 
-# Metabase (usuário dedicado no Postgres)
+# Metabase (banco próprio: metabase-db)
 METABASE_DB=metabase
 METABASE_DB_USER=metabase_user
 METABASE_DB_PASSWORD=TROQUE_POR_SENHA_FORTE
@@ -207,9 +198,6 @@ METABASE_DB_PASSWORD=TROQUE_POR_SENHA_FORTE
 # Grafana
 GRAFANA_USER=admin
 GRAFANA_PASSWORD=TROQUE_POR_SENHA_FORTE
-GRAFANA_DB=grafana
-GRAFANA_DB_USER=grafana_user
-GRAFANA_DB_PASSWORD=TROQUE_POR_SENHA_FORTE
 
 # Dashboard Traefik (basic auth)
 # Gere com: echo "usuario:$(openssl passwd -apr1 senha)" | sed -e 's/\$/\$\$/g'
@@ -298,7 +286,7 @@ A saída deve mostrar todos os serviços como `healthy` ou `running`:
 ```
 NAME         IMAGE                    STATUS
 traefik      traefik:v3.1             running (healthy)
-postgres     postgres:16-alpine       running (healthy)
+metabase-db  postgres:16-alpine       running (healthy)
 redis        redis:7-alpine           running (healthy)
 metabase     metabase/metabase        running (healthy)
 grafana      grafana/grafana          running (healthy)
@@ -322,15 +310,17 @@ Após tudo subir (aguarde ~2 minutos para o SSL ser emitido):
 
 ## 📦 Adicionar uma nova aplicação
 
-Crie o `docker-compose.yml` da sua app (veja `docker-compose.app-example.yml` como modelo):
+Crie o `docker-compose.yml` da sua app (veja `examples/docker-compose.app-example.yml` como modelo):
 
 ```bash
 mkdir /opt/minha-api
 vim /opt/minha-api/docker-compose.yml
 ```
 
-Pontos importantes no compose da app:
-- Conecte às redes `proxy` e `internal` (ambas `external: true`)
+Pontos importantes no compose da app (detalhes em `docs/ARCHITECTURE.md`):
+- App nas redes `traefik_public` (só se tiver rota pública) e `infra_internal` (Redis, Loki), ambas `external: true`
+- Postgres próprio da app, nas redes `<app>_net` e `infra_data`, com usuário `<app>_reader` para o Metabase (`examples/postgres-init-reader.sh`)
+- Reserve um DB number do Redis em `redis/databases.md`
 - Adicione as labels do Traefik para o subdomínio
 - **Não declare `ports:`** — o Traefik faz o roteamento
 
@@ -350,16 +340,17 @@ docker compose -f /opt/minha-api/docker-compose.yml up -d
 | 22 | ✅ Aberta (rate limit) | SSH |
 | 80 | ✅ Aberta | HTTP → redireciona para HTTPS |
 | 443 | ✅ Aberta | HTTPS via Traefik |
-| 5432 | ❌ Fechada | PostgreSQL — só via rede Docker |
+| 5432 | ❌ Fechada | PostgreSQL das apps — só via rede Docker |
 | 6379 | ❌ Fechada | Redis — só via rede Docker |
 | 3100 | ❌ Fechada | Loki — só via rede Docker |
 | 8080 | ❌ Fechada | Traefik dashboard — só via HTTPS |
 
 ### Redes Docker
 
-- **`proxy`** — Traefik + containers que precisam ser acessados externamente
-- **`internal`** — Postgres, Redis, Loki — inacessível de fora
-- **`observability`** — Rede dedicada para observabilidade. Permite que Grafana, Loki e Promtail troquem dados de métricas e logs de forma isolada, sem expor portas externas. Use esta rede para conectar serviços de monitoramento e logging.
+- **`traefik_public`** — Traefik + containers que precisam ser acessados externamente
+- **`infra_internal`** — Redis, Loki, Promtail, Grafana e apps — inacessível de fora
+- **`infra_data`** — Metabase + bancos das apps (leitura com usuário `*_reader`)
+- **`<app>_net`** — rede privada de cada app com o banco dela
 
 ---
 
@@ -373,7 +364,7 @@ docker compose ps
 docker compose logs -f
 
 # Logs de um serviço específico
-docker compose logs -f postgres
+docker compose logs -f metabase-db
 docker compose logs -f traefik
 
 # Reiniciar um serviço
@@ -385,8 +376,8 @@ docker compose down
 # Atualizar imagens e reiniciar
 docker compose pull && docker compose up -d
 
-# Acessar o PostgreSQL diretamente
-docker exec -it postgres psql -U admin -d main
+# Acessar o PostgreSQL de uma app (cada app tem o seu)
+docker exec -it <app>-db psql -U <usuario> -d <banco>
 
 # Verificar regras do firewall
 ufw status verbose
@@ -394,8 +385,8 @@ ufw status verbose
 # Ver IPs bloqueados pelo Fail2Ban
 fail2ban-client status sshd
 
-# Backup do banco inteiro
-docker exec postgres pg_dumpall -U admin > backup_$(date +%Y%m%d).sql
+# Backup do banco de uma app
+docker exec <app>-db pg_dump -U <usuario> <banco> > backup_<app>_$(date +%Y%m%d).sql
 ```
 
 ---
@@ -427,19 +418,19 @@ docker inspect nome_do_servico | jq '.[0].State'
 # Verifique variáveis de ambiente, dependências e healthchecks
 ```
 
-### Postgres não conecta
+### Postgres de uma app não conecta
 ```bash
-docker exec -it postgres pg_isready -U admin
+docker exec -it <app>-db pg_isready -U <usuario>
 # Verifique:
-# - POSTGRES_USER e POSTGRES_PASSWORD no .env
-# - Rede interna configurada corretamente
-# - Container da aplicação está na rede 'internal'
+# - POSTGRES_USER e POSTGRES_PASSWORD no .env da app
+# - App e banco na mesma rede <app>_net
+# - Metabase: banco também na rede 'infra_data' e usuário <app>_reader criado
 ```
 
 ### Traefik não roteia para a app
 ```bash
-# Verifique se a app está na rede 'proxy'
-docker network inspect proxy
+# Verifique se a app está na rede 'traefik_public'
+docker network inspect traefik_public
 # Verifique as labels no docker-compose da app
 docker inspect nome_da_app | jq '.[0].Config.Labels'
 # Certifique-se de que não há conflito de portas ou subdomínios
@@ -454,6 +445,6 @@ ufw status verbose
 
 ### Falha no backup do banco
 ```bash
-docker exec postgres pg_dumpall -U admin > backup_$(date +%Y%m%d).sql
+docker exec <app>-db pg_dump -U <usuario> <banco> > backup_<app>_$(date +%Y%m%d).sql
 # Verifique espaço em disco e permissões
 ```

@@ -60,6 +60,7 @@ services:
       POSTGRES_DB: minha_api
       POSTGRES_USER: minha_api_user
       POSTGRES_PASSWORD: SENHA_AQUI
+      DB_READER_PASSWORD: ${DB_READER_PASSWORD}
       PGDATA: /var/lib/postgresql/data/pgdata
     volumes:
       - minha_api_data:/var/lib/postgresql/data

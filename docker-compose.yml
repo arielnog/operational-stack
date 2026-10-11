@@ -167,6 +167,9 @@ services:
 
   # -----------------------------------------------------------
   # REDIS — Cache/filas compartilhado (ver redis/databases.md)
+  # noeviction: memória cheia recusa escrita em vez de apagar chaves
+  # (filas e índices não podem sumir). Toda chave de cache precisa de TTL.
+  # AOF (appendonly) limita a perda em queda a ~1 s.
   # -----------------------------------------------------------
   redis:
     image: redis:7-alpine
@@ -178,7 +181,9 @@ services:
       redis-server
       --requirepass ${REDIS_PASSWORD}
       --maxmemory 256mb
-      --maxmemory-policy allkeys-lru
+      --maxmemory-policy noeviction
+      --appendonly yes
+      --appendfsync everysec
       --save 60 1
       --loglevel warning
     volumes:

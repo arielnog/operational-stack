@@ -7,7 +7,7 @@
 #    2. Instala dependências essenciais (curl, vim, htop...)
 #    3. Instala o Docker + Docker Compose plugin
 #    4. Configura o daemon do Docker (logs, segurança)
-#    5. Cria a rede Docker pública 'proxy'
+#    5. Cria as redes Docker traefik_public, infra_internal e infra_data
 #    6. Instala e configura o Fail2Ban (proteção SSH)
 #    7. Opcional: desabilita login SSH por senha
 #    8. Cria diretório de logs do Traefik
@@ -189,16 +189,18 @@ info "  live-restore:  containers continuam se o daemon reiniciar"
 info "  userland-proxy: desabilitado (melhor performance)"
 
 # =============================================================
-# ETAPA 5/9 — Rede Docker 'proxy'
+# ETAPA 5/9 — Redes Docker externas (ver docs/ARCHITECTURE.md)
 # =============================================================
-step "ETAPA 5/9 — Criando rede Docker 'proxy'"
+step "ETAPA 5/9 — Criando redes Docker: traefik_public, infra_internal, infra_data"
 
-if docker network ls --format '{{.Name}}' | grep -q "^proxy$"; then
-  ok "Rede 'proxy' já existe."
-else
-  docker network create proxy
-  ok "Rede Docker 'proxy' criada."
-fi
+for net in traefik_public infra_internal infra_data; do
+  if docker network ls --format '{{.Name}}' | grep -q "^${net}$"; then
+    ok "Rede '${net}' já existe."
+  else
+    docker network create "${net}"
+    ok "Rede Docker '${net}' criada."
+  fi
+done
 
 info "Redes Docker disponíveis:"
 docker network ls --format "  • {{.Name}} ({{.Driver}})"
