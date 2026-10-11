@@ -12,13 +12,30 @@ com permissão só no seu vhost. O usuário administrador (`RABBITMQ_ADMIN_USER`
 
 ## Criar vhost e usuário de uma app
 
+Um **vhost** é um espaço isolado dentro do RabbitMQ, com filas e exchanges próprios (como um banco separado
+no Postgres). O usuário da app só enxerga o vhost dela. A senha do usuário é nova e diferente da do
+administrador; gere com `openssl rand -hex 24` (só hexadecimal, para não precisar escapar na URL de conexão).
+
+Os comandos rodam na VPS, de qualquer pasta: `docker exec rabbitmq` executa dentro do container, e o
+`rabbitmqctl` é a ferramenta de administração do RabbitMQ.
+
 ```bash
 APP=notification-price
+
+# Cria o vhost da app.
 docker exec rabbitmq rabbitmqctl add_vhost "$APP"
-docker exec rabbitmq rabbitmqctl add_user "$APP" '<senha forte>'
+
+# Cria o usuário da app, com a senha gerada.
+docker exec rabbitmq rabbitmqctl add_user "$APP" 'SENHA_GERADA'
+
+# Permissão para configurar, publicar e consumir (os três '.*'), só dentro do vhost da app.
 docker exec rabbitmq rabbitmqctl set_permissions -p "$APP" "$APP" '.*' '.*' '.*'
-# Só se a app lê métricas pela API de gerenciamento (ex.: profundidade das filas):
+
+# Só se a app lê estatísticas das filas pela API de gerenciamento (o notification-price lê).
 docker exec rabbitmq rabbitmqctl set_user_tags "$APP" monitoring
+
+# Confere as permissões.
+docker exec rabbitmq rabbitmqctl list_permissions -p "$APP"
 ```
 
 ## Conexão
