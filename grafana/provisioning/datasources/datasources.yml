@@ -1,12 +1,12 @@
 # grafana/provisioning/datasources/datasources.yml
-# uids fixos: os dashboards em grafana/dashboards referenciam "prometheus" e "loki".
+# uids fixos: os dashboards em grafana/dashboards referenciam "prometheus" e o uid do Loki abaixo.
 
 apiVersion: 1
 
 datasources:
   - name: Loki
     type: loki
-    uid: loki
+    uid: P8E80F9AEF21F6940   # uid já existente do Loki; trocar o uid de um datasource existente quebra o provisioning
     access: proxy
     url: http://loki:3100
     isDefault: true

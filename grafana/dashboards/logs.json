@@ -75,7 +75,7 @@
       "dashes": false,
       "datasource": {
         "type": "loki",
-        "uid": "loki"
+        "uid": "P8E80F9AEF21F6940"
       },
       "fieldConfig": {
         "defaults": {
@@ -168,7 +168,7 @@
     {
       "datasource": {
         "type": "loki",
-        "uid": "loki"
+        "uid": "P8E80F9AEF21F6940"
       },
       "fieldConfig": {
         "defaults": {
@@ -216,7 +216,7 @@
         "current": {},
         "datasource": {
           "type": "loki",
-          "uid": "loki"
+          "uid": "P8E80F9AEF21F6940"
         },
         "definition": "label_values(container)",
         "hide": 0,

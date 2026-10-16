@@ -21,7 +21,7 @@
         "type": "query",
         "datasource": {
           "type": "loki",
-          "uid": "loki"
+          "uid": "P8E80F9AEF21F6940"
         },
         "query": "label_values(container)",
         "definition": "label_values(container)",
@@ -1033,7 +1033,7 @@
       "description": "Linhas com error/exception/fatal/panic/critical.",
       "datasource": {
         "type": "loki",
-        "uid": "loki"
+        "uid": "P8E80F9AEF21F6940"
       },
       "gridPos": {
         "h": 8,
@@ -1045,7 +1045,7 @@
         {
           "datasource": {
             "type": "loki",
-            "uid": "loki"
+            "uid": "P8E80F9AEF21F6940"
           },
           "refId": "A",
           "legendFormat": "{{container}}",
@@ -1092,7 +1092,7 @@
       "title": "Logs",
       "datasource": {
         "type": "loki",
-        "uid": "loki"
+        "uid": "P8E80F9AEF21F6940"
       },
       "gridPos": {
         "h": 14,
@@ -1104,7 +1104,7 @@
         {
           "datasource": {
             "type": "loki",
-            "uid": "loki"
+            "uid": "P8E80F9AEF21F6940"
           },
           "refId": "A",
           "expr": "{container=~\"$app\"} |~ \"(?i)$busca\""
