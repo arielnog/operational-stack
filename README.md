@@ -155,7 +155,7 @@ O script vai te guiar interativamente por 9 etapas:
 | 2 | Instala: curl, wget, vim, htop, jq, dnsutils, unzip... |
 | 3 | Instala Docker + Docker Compose plugin + pergunta usuário do grupo docker |
 | 4 | Configura `/etc/docker/daemon.json` (logs, live-restore) |
-| 5 | Cria as redes Docker `traefik_public`, `infra_internal` e `infra_data` |
+| 5 | Cria as redes Docker `traefik_public`, `infra_internal`, `infra_data` e `observability` |
 | 6 | Instala Fail2Ban — bloqueia IPs após 3 tentativas SSH falhas |
 | 7 | Pergunta se quer desabilitar login SSH por senha |
 | 8 | Cria `/var/log/traefik` e `/etc/iptables` |

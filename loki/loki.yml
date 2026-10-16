@@ -9,7 +9,7 @@ server:
   log_level: warn
 
 common:
-  instance_addr: ${HOSTNAME}  # ✅ IP do container
+  instance_addr: 127.0.0.1  # nó único; resolver o hostname do container falhava às vezes
   path_prefix: /loki
   storage:
     filesystem:

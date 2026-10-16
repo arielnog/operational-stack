@@ -24,6 +24,10 @@ networks:
   infra_data: 
     external: true
 
+  # Observabilidade — Loki, Alloy, Prometheus e Grafana
+  observability:
+    external: true
+
 volumes:
   metabase_db_data:
   metabase_data:
@@ -240,6 +244,7 @@ services:
     restart: unless-stopped
     networks:
       - infra_internal
+      - observability
     command: -config.file=/etc/loki/loki.yml -target=all -config.expand-env=true
     volumes:
       - loki_data:/loki
@@ -260,7 +265,7 @@ services:
     container_name: alloy
     restart: unless-stopped
     networks:
-      - infra_internal
+      - observability
     command: run /etc/alloy/config.alloy --server.http.listen-addr=0.0.0.0:12345 --storage.path=/var/lib/alloy/data
     volumes:
       - ./alloy/config.alloy:/etc/alloy/config.alloy:ro
