@@ -67,6 +67,12 @@ services:
       - "traefik.http.routers.traefik-dashboard.tls.certresolver=cloudflare"
       - "traefik.http.routers.traefik-dashboard.service=api@internal"
       - "traefik.http.routers.traefik-dashboard.middlewares=auth@docker"
+      # Só via tailnet (DNS traefik.int → IP 100.x da VPS, nuvem cinza)
+      - "traefik.http.routers.traefik-dashboard-int.rule=Host(`traefik.int.${DOMAIN}`)"
+      - "traefik.http.routers.traefik-dashboard-int.entrypoints=websecure"
+      - "traefik.http.routers.traefik-dashboard-int.tls.certresolver=cloudflare"
+      - "traefik.http.routers.traefik-dashboard-int.service=api@internal"
+      - "traefik.http.routers.traefik-dashboard-int.middlewares=tailnet-only@file,auth@docker"
     healthcheck:
       test: ["CMD", "traefik", "healthcheck", "--ping"]
       interval: 30s
@@ -114,7 +120,7 @@ services:
       MB_DB_USER: ${METABASE_DB_USER:-metabase_user}
       MB_DB_PASS: ${METABASE_DB_PASSWORD}
       MB_DB_HOST: metabase-db
-      MB_SITE_URL: https://metabase.${DOMAIN}
+      MB_SITE_URL: https://metabase.int.${DOMAIN}
       JAVA_TIMEZONE: America/Sao_Paulo
     volumes:
       - metabase_data:/metabase-data
@@ -123,9 +129,11 @@ services:
         condition: service_healthy
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.metabase.rule=Host(`metabase.${DOMAIN}`)"
-      - "traefik.http.routers.metabase.entrypoints=websecure"
-      - "traefik.http.routers.metabase.tls.certresolver=cloudflare"
+      # Só via tailnet (DNS metabase.int → IP 100.x da VPS, nuvem cinza)
+      - "traefik.http.routers.metabase-int.rule=Host(`metabase.int.${DOMAIN}`)"
+      - "traefik.http.routers.metabase-int.entrypoints=websecure"
+      - "traefik.http.routers.metabase-int.tls.certresolver=cloudflare"
+      - "traefik.http.routers.metabase-int.middlewares=tailnet-only@file"
       - "traefik.http.services.metabase.loadbalancer.server.port=3000"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
@@ -147,8 +155,8 @@ services:
     environment:
       GF_SECURITY_ADMIN_USER: ${GRAFANA_USER}
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD}
-      GF_SERVER_ROOT_URL: https://grafana.${DOMAIN}
-      GF_SERVER_DOMAIN: grafana.${DOMAIN}
+      GF_SERVER_ROOT_URL: https://grafana.int.${DOMAIN}
+      GF_SERVER_DOMAIN: grafana.int.${DOMAIN}
       GF_ANALYTICS_REPORTING_ENABLED: "false"
       GF_LOG_MODE: console
     volumes:
@@ -156,9 +164,11 @@ services:
       - ./grafana/provisioning:/etc/grafana/provisioning:ro
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.grafana.rule=Host(`grafana.${DOMAIN}`)"
-      - "traefik.http.routers.grafana.entrypoints=websecure"
-      - "traefik.http.routers.grafana.tls.certresolver=cloudflare"
+      # Só via tailnet (DNS grafana.int → IP 100.x da VPS, nuvem cinza)
+      - "traefik.http.routers.grafana-int.rule=Host(`grafana.int.${DOMAIN}`)"
+      - "traefik.http.routers.grafana-int.entrypoints=websecure"
+      - "traefik.http.routers.grafana-int.tls.certresolver=cloudflare"
+      - "traefik.http.routers.grafana-int.middlewares=tailnet-only@file"
       - "traefik.http.services.grafana.loadbalancer.server.port=3000"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]

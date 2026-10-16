@@ -307,9 +307,11 @@ Após tudo subir (aguarde ~2 minutos para o SSL ser emitido):
 
 | Serviço | URL | Usuário padrão |
 |---------|-----|----------------|
-| Traefik dashboard | `https://traefik.seudominio.com` | basic auth do `.env` |
-| Metabase | `https://metabase.seudominio.com` | criado no primeiro acesso |
-| Grafana | `https://grafana.seudominio.com` | admin / senha do `.env` |
+| Traefik dashboard | `https://traefik.int.seudominio.com` (só via tailnet) | basic auth do `.env` |
+| Metabase | `https://metabase.int.seudominio.com` (só via tailnet) | criado no primeiro acesso |
+| Grafana | `https://grafana.int.seudominio.com` (só via tailnet) | admin / senha do `.env` |
+
+Os `*.int` apontam no DNS (nuvem cinza) para o IP `100.x` da VPS e passam pelo middleware `tailnet-only`. Passo a passo do Tailscale em `docs/tailscale.md`.
 
 ---
 
