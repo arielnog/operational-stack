@@ -158,3 +158,29 @@ prometheus.scrape "health" {
 	scrape_interval = "30s"
 	forward_to      = [prometheus.remote_write.default.receiver]
 }
+
+// ── redis ─────────────────────────────────────────────────────────
+prometheus.exporter.redis "redis" {
+	redis_addr     = "redis:6379"
+	redis_password = sys.env("REDIS_PASSWORD")
+}
+
+discovery.relabel "redis" {
+	targets = prometheus.exporter.redis.redis.targets
+
+	rule {
+		target_label = "job"
+		replacement  = "redis"
+	}
+
+	rule {
+		target_label = "instance"
+		replacement  = "redis"
+	}
+}
+
+prometheus.scrape "redis" {
+	targets         = discovery.relabel.redis.output
+	scrape_interval = "30s"
+	forward_to      = [prometheus.remote_write.default.receiver]
+}

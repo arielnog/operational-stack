@@ -271,6 +271,8 @@ services:
       - observability
       - infra_internal
       - traefik_public
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
     # Carrega todos os .alloy da pasta (logs.alloy, metrics.alloy)
     command: run /etc/alloy --server.http.listen-addr=0.0.0.0:12345 --storage.path=/var/lib/alloy/data
     # cgroup do host: o cAdvisor precisa enxergar os cgroups de todos os containers
