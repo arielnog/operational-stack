@@ -69,8 +69,9 @@ Prompt compilado com todas as decisões aprovadas para geração ou regeneraçã
 | Rede | Quem entra | Para quê |
 |------|------------|----------|
 | **traefik_public** | traefik, metabase, grafana, apps com rota pública | Roteamento externo via Traefik |
-| **infra_internal** | loki, promtail, grafana, redis, rabbitmq, apps pessoais | Comunicação interna da infra, acesso ao Redis e ao RabbitMQ |
-| **infra_data** | metabase, bancos das apps (somente read-only) | Metabase lê os bancos sem porta exposta |
+| **infra_internal** | loki, alloy, grafana, redis, rabbitmq, apps pessoais | Comunicação interna da infra, acesso ao Redis e ao RabbitMQ |
+| **infra_data** | metabase, alloy, bancos das apps | Metabase lê os bancos (`*_reader`) e o Alloy coleta métricas (`monitor`), sem porta exposta |
+| **observability** | loki, alloy, prometheus, grafana | Logs e métricas; Prometheus só é alcançável por aqui |
 | ***_net** (por app) | app + banco dela | Comunicação interna exclusiva da app |
 
 ### Regras de rede
@@ -96,7 +97,7 @@ Prompt compilado com todas as decisões aprovadas para geração ou regeneraçã
                            │                                  │
          ┌─────────────────▼──────────────┐    ┌──────────────▼──────────────┐
          │        infra_internal           │    │        infra_data            │
-         │  redis · loki · promtail ·      │    │  metabase · postgres_app1   │
+         │  redis · loki · alloy ·         │    │  metabase · postgres_app1   │
          │  grafana · apps (acesso Redis)  │    │  postgres_app2 · ...         │
          └────────────────────────────────┘    │  (somente leitura)           │
                                                └─────────────────────────────┘

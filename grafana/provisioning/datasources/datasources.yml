@@ -1,15 +1,27 @@
 # grafana/provisioning/datasources/datasources.yml
-# Loki pré-configurado para visualização de logs
+# uids fixos: os dashboards em grafana/dashboards referenciam "prometheus" e o uid do Loki abaixo.
 
 apiVersion: 1
 
 datasources:
   - name: Loki
     type: loki
+    uid: P8E80F9AEF21F6940   # uid já existente do Loki; trocar o uid de um datasource existente quebra o provisioning
     access: proxy
     url: http://loki:3100
     isDefault: true
     jsonData:
       maxLines: 1000
+    version: 1
+    editable: false
+
+  # Métricas enviadas pelo Alloy (ver alloy/metrics.alloy)
+  - name: Prometheus
+    type: prometheus
+    uid: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    jsonData:
+      timeInterval: 30s   # intervalo de coleta do Alloy; base do $__rate_interval
     version: 1
     editable: false

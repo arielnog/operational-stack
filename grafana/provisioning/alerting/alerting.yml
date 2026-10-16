@@ -1,0 +1,224 @@
+# grafana/provisioning/alerting/alerting.yml
+# Alertas da pasta Infra → WhatsApp via Evolution API (instância e token no .env).
+# Evite "$" nos textos: o Grafana troca $VAR por variável de ambiente neste arquivo.
+# Por isso as anotações usam {{ .Labels.x }} em vez de {{ $labels.x }}.
+
+apiVersion: 1
+
+# ── Mensagem ─────────────────────────────────────────────────────────
+templates:
+  - orgId: 1
+    name: whatsapp
+    template: |
+      {{ define "whatsapp.text" -}}
+      {{ range .Alerts -}}
+      {{ if eq .Status "firing" }}🔴{{ else }}✅ Resolvido:{{ end }} *{{ .Labels.alertname }}*
+      {{ .Annotations.summary }}
+      {{ end -}}
+      {{- end }}
+
+      {{ define "whatsapp.payload" -}}
+      {{ coll.Dict "number" (reReplaceAll "^tel:" "" .Vars.number) "text" (tmpl.Exec "whatsapp.text" .) | data.ToJSON }}
+      {{- end }}
+
+# ── Para onde vai ────────────────────────────────────────────────────
+# Depende da própria Evolution: se ela cair, o alerta não chega.
+contactPoints:
+  - orgId: 1
+    name: whatsapp
+    receivers:
+      - uid: whatsapp-evolution
+        type: webhook
+        settings:
+          url: http://evolution_api:8000/message/sendText/${EVOLUTION_ALERT_INSTANCE}
+          httpMethod: POST
+          headers:
+            apikey: ${EVOLUTION_ALERT_APIKEY}
+          payload:
+            template: '{{ template "whatsapp.payload" . }}'
+            vars:
+              # "tel:" mantém o valor como texto (só número vira int e quebra o
+              # provisioning); o template remove o prefixo.
+              number: "tel:${ALERT_WHATSAPP_NUMBER}"
+
+policies:
+  - orgId: 1
+    receiver: whatsapp
+    group_by: ["alertname"]
+    group_wait: 30s
+    group_interval: 5m
+    repeat_interval: 4h
+
+# ── Regras ───────────────────────────────────────────────────────────
+# Cada regra: A = query instantânea no Prometheus, C = limite sobre A.
+groups:
+  - orgId: 1
+    name: infra
+    folder: Infra
+    interval: 1m
+    rules:
+      - uid: app-down
+        title: App fora do ar
+        condition: C
+        for: 2m
+        noDataState: NoData
+        execErrState: Error
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{ .Labels.instance }} não responde no health interno."
+        data:
+          - refId: A
+            relativeTimeRange: { from: 300, to: 0 }
+            datasourceUid: prometheus
+            model:
+              refId: A
+              expr: probe_success{job="health"}
+              instant: true
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator: { type: lt, params: [1] }
+
+      - uid: traefik-5xx
+        title: Muitos erros 5xx
+        condition: C
+        for: 5m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ .Labels.service }} com mais de 5% de respostas 5xx."
+        data:
+          - refId: A
+            relativeTimeRange: { from: 600, to: 0 }
+            datasourceUid: prometheus
+            model:
+              refId: A
+              # Só conta serviço com pelo menos 10 requests em 5 min (evita 1 erro = 100%)
+              expr: >-
+                (sum by (service) (rate(traefik_service_requests_total{code=~"5.."}[5m]))
+                / sum by (service) (rate(traefik_service_requests_total[5m])))
+                and on (service) sum by (service) (increase(traefik_service_requests_total[5m])) >= 10
+              instant: true
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator: { type: gt, params: [0.05] }
+
+      - uid: disk-low
+        title: Disco quase cheio
+        condition: C
+        for: 5m
+        noDataState: NoData
+        execErrState: Error
+        labels:
+          severity: critical
+        annotations:
+          summary: "Menos de 15% livre no disco / da VPS."
+        data:
+          - refId: A
+            relativeTimeRange: { from: 300, to: 0 }
+            datasourceUid: prometheus
+            model:
+              refId: A
+              expr: 100 * node_filesystem_avail_bytes{mountpoint="/"} / node_filesystem_size_bytes{mountpoint="/"}
+              instant: true
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator: { type: lt, params: [15] }
+
+      - uid: tls-expiring
+        title: Certificado TLS vencendo
+        condition: C
+        for: 1h
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          summary: "Certificado {{ .Labels.cn }} vence em menos de 14 dias."
+        data:
+          - refId: A
+            relativeTimeRange: { from: 300, to: 0 }
+            datasourceUid: prometheus
+            model:
+              refId: A
+              expr: min by (cn) ((traefik_tls_certs_not_after - time()) / 86400)
+              instant: true
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator: { type: lt, params: [14] }
+
+      - uid: container-restarting
+        title: Container reiniciando
+        condition: C
+        for: 0s
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ .Labels.name }} reiniciou 2 ou mais vezes em 15 min."
+        data:
+          - refId: A
+            relativeTimeRange: { from: 900, to: 0 }
+            datasourceUid: prometheus
+            model:
+              refId: A
+              expr: sum by (name) (changes(container_start_time_seconds{name!=""}[15m]))
+              instant: true
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator: { type: gt, params: [1] }
+
+      - uid: target-down
+        title: Coleta de métricas falhando
+        condition: C
+        for: 5m
+        noDataState: NoData
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          summary: "Job {{ .Labels.job }} ({{ .Labels.instance }}) com up == 0."
+        data:
+          - refId: A
+            relativeTimeRange: { from: 300, to: 0 }
+            datasourceUid: prometheus
+            model:
+              refId: A
+              expr: up
+              instant: true
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator: { type: lt, params: [1] }

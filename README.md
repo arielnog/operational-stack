@@ -19,13 +19,23 @@ vps-stack/
 ├── loki/
 │   └── loki.yml                    # Agregador de logs
 │
+├── alloy/
+│   ├── logs.alloy                  # Coleta de logs (host + containers) → Loki
+│   └── metrics.alloy               # Exporters embutidos + health → Prometheus
+│
+├── prometheus/
+│   └── prometheus.yml              # Só armazena (15 dias), quem coleta é o Alloy
+│
 ├── promtail/
-│   └── promtail.yml                # Coleta de logs (host + containers)
+│   └── promtail.yml                # Config antiga (Promtail EOL), só referência
 │
 ├── grafana/
+│   ├── dashboards/                 # JSONs da pasta "Infra" (Visão Geral e outros)
 │   └── provisioning/
+│       ├── dashboards/
+│       │   └── dashboards.yml      # Carrega grafana/dashboards
 │       └── datasources/
-│           └── datasources.yml     # Loki pré-configurado
+│           └── datasources.yml     # Loki e Prometheus
 │
 └── scripts/
     ├── setup_vps.sh                # ① Setup inicial da VPS (rodar 1x)
@@ -61,7 +71,7 @@ Metabase  Grafana   Suas Apps    (futuras apps)
             ▼
 ┌──────────────────────────────────────────────────────────────┐
 │  REDE INTERNA (não acessível externamente)                   │
-│  Redis · RabbitMQ · Loki · Promtail  (Postgres é por app)    │
+│  Redis · RabbitMQ · Loki · Alloy · Prometheus (Postgres/app) │
 └──────────────────────────────────────────────────────────────┘
 ```
 
@@ -155,7 +165,7 @@ O script vai te guiar interativamente por 9 etapas:
 | 2 | Instala: curl, wget, vim, htop, jq, dnsutils, unzip... |
 | 3 | Instala Docker + Docker Compose plugin + pergunta usuário do grupo docker |
 | 4 | Configura `/etc/docker/daemon.json` (logs, live-restore) |
-| 5 | Cria as redes Docker `traefik_public`, `infra_internal` e `infra_data` |
+| 5 | Cria as redes Docker `traefik_public`, `infra_internal`, `infra_data` e `observability` |
 | 6 | Instala Fail2Ban — bloqueia IPs após 3 tentativas SSH falhas |
 | 7 | Pergunta se quer desabilitar login SSH por senha |
 | 8 | Cria `/var/log/traefik` e `/etc/iptables` |
@@ -296,7 +306,8 @@ rabbitmq     rabbitmq:3.13-management running (healthy)
 metabase     metabase/metabase        running (healthy)
 grafana      grafana/grafana          running (healthy)
 loki         grafana/loki             running (healthy)
-promtail     grafana/promtail         running
+alloy        grafana/alloy            running
+prometheus   prom/prometheus          running (healthy)
 ```
 
 ---
@@ -357,7 +368,8 @@ docker compose -f /opt/minha-api/docker-compose.yml up -d
 ### Redes Docker
 
 - **`traefik_public`** — Traefik + containers que precisam ser acessados externamente
-- **`infra_internal`** — Redis, Loki, Promtail, Grafana e apps — inacessível de fora
+- **`infra_internal`** — Redis, Loki, Alloy, Grafana e apps — inacessível de fora
+- **`observability`** — Loki, Alloy, Prometheus e Grafana
 - **`infra_data`** — Metabase + bancos das apps (leitura com usuário `*_reader`)
 - **`<app>_net`** — rede privada de cada app com o banco dela
 
@@ -402,7 +414,11 @@ docker exec <app>-db pg_dump -U <usuario> <banco> > backup_<app>_$(date +%Y%m%d)
 
 ## 📊 Observabilidade
 
-- **Logs de containers** — Promtail coleta automaticamente via Docker socket
+- **Logs de containers** — Alloy coleta automaticamente via Docker socket
+- **Métricas** — o Alloy faz o papel de node-exporter, cAdvisor, blackbox, postgres e redis exporter e manda para o Prometheus (15 dias). O Traefik expõe métricas na `:8082` só dentro da rede
+- **Dashboards** — Grafana → pasta **Infra** → **Visão Geral** (health, tráfego, recursos, logs). Edite os JSONs em `grafana/dashboards/`, não a UI
+- **Alertas** — 6 regras em `grafana/provisioning/alerting/alerting.yml` chegam no WhatsApp via Evolution (instância, token e número no `.env`). Se a própria Evolution cair, o alerta não chega
+- **App nova** — para aparecer no health, adicione um `target` em `alloy/metrics.alloy` com a URL interna do health e rode `docker restart alloy`
 - **Logs do host** — `/var/log/syslog` e `/var/log/auth.log` também coletados
 - **Visualização** — Grafana → Explore → selecione datasource Loki
 - **Retenção** — 30 dias (altere em `loki/loki.yml` → `retention_period`)

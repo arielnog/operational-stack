@@ -5,7 +5,7 @@ version: "3.9"
 #  Arquitetura: docs/ARCHITECTURE.md
 #
 #  Serviços: Traefik · Metabase (banco próprio) · Grafana
-#            Loki · Promtail · Redis
+#            Loki · Alloy · Redis
 #
 #  Sem Postgres global — cada app sobe seu próprio banco
 # =============================================================
@@ -15,13 +15,17 @@ networks:
   traefik_public:
     external: true
 
-  # Comunicação interna — Redis, Loki, Promtail, Grafana, apps
+  # Comunicação interna — Redis, Loki, Alloy, Grafana, apps
   infra_internal:
     external: true
 
   # Metabase conecta aos bancos das apps (read-only)
   # Apps conectam o Postgres delas a esta rede
   infra_data: 
+    external: true
+
+  # Observabilidade — Loki, Alloy, Prometheus e Grafana
+  observability:
     external: true
 
 volumes:
@@ -32,6 +36,8 @@ volumes:
   traefik_certs:
   redis_data:
   rabbitmq_data:
+  alloy_data:
+  prometheus_data:
 
 # =============================================================
 services:
@@ -152,6 +158,7 @@ services:
     networks:
       - traefik_public
       - infra_internal
+      - observability
     environment:
       GF_SECURITY_ADMIN_USER: ${GRAFANA_USER}
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD}
@@ -159,9 +166,14 @@ services:
       GF_SERVER_DOMAIN: grafana.int.${DOMAIN}
       GF_ANALYTICS_REPORTING_ENABLED: "false"
       GF_LOG_MODE: console
+      # Alertas via WhatsApp (grafana/provisioning/alerting/alerting.yml)
+      EVOLUTION_ALERT_INSTANCE: ${EVOLUTION_ALERT_INSTANCE}
+      EVOLUTION_ALERT_APIKEY: ${EVOLUTION_ALERT_APIKEY}
+      ALERT_WHATSAPP_NUMBER: ${ALERT_WHATSAPP_NUMBER}
     volumes:
       - grafana_data:/var/lib/grafana
       - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
     labels:
       - "traefik.enable=true"
       # Só via tailnet (DNS grafana.int → IP 100.x da VPS, nuvem cinza)
@@ -239,6 +251,7 @@ services:
     restart: unless-stopped
     networks:
       - infra_internal
+      - observability
     command: -config.file=/etc/loki/loki.yml -target=all -config.expand-env=true
     volumes:
       - loki_data:/loki
@@ -251,20 +264,65 @@ services:
       start_period: 60s
 
   # -----------------------------------------------------------
-  # PROMTAIL — Coleta e envia logs para o Loki
+  # ALLOY — Substituto do Promtail (EOL). Mesmos labels no Loki.
+  # UI/métricas na 12345 só dentro da rede, sem porta no host.
   # -----------------------------------------------------------
-  promtail:
-    image: grafana/promtail:2.9.7   # ✅ mesma versão do Loki
-    container_name: promtail
+  alloy:
+    image: grafana/alloy:v1.20.1
+    container_name: alloy
     restart: unless-stopped
+    # observability: Loki e Prometheus. Demais redes: alcançar apps, Redis,
+    # bancos (infra_data) e Traefik para os probes e exporters.
     networks:
+      - observability
       - infra_internal
+      - infra_data
+      - traefik_public
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      POSTGRES_MONITOR_PASSWORD: ${POSTGRES_MONITOR_PASSWORD}
+    # Carrega todos os .alloy da pasta (logs.alloy, metrics.alloy)
+    command: run /etc/alloy --server.http.listen-addr=0.0.0.0:12345 --storage.path=/var/lib/alloy/data
+    # cgroup do host: o cAdvisor precisa enxergar os cgroups de todos os containers
+    cgroup: host
     volumes:
+      - ./alloy:/etc/alloy:ro
       - /var/log:/var/log:ro
-      - /var/lib/docker/containers:/var/lib/docker/containers:ro
-      - /var/run/docker.sock:/var/run/docker.sock:ro  # ✅ read-only é suficiente
-      - ./promtail/promtail.yml:/etc/promtail/promtail.yml:ro
-    command: -config.file=/etc/promtail/promtail.yml
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /run/containerd/containerd.sock:/run/containerd/containerd.sock:ro
+      - alloy_data:/var/lib/alloy/data
+      # node e cAdvisor leem o host (somente leitura)
+      - /:/rootfs:ro,rslave
+      - /proc:/host/proc:ro
+      - /sys:/sys:ro
+      - /var/lib/docker:/var/lib/docker:ro
+      - /dev/disk:/dev/disk:ro
+      - /run/udev/data:/run/udev/data:ro
     depends_on:
       loki:
         condition: service_healthy
+
+  # -----------------------------------------------------------
+  # PROMETHEUS — Armazena as métricas enviadas pelo Alloy
+  # 9090 só dentro da rede observability, sem porta no host.
+  # -----------------------------------------------------------
+  prometheus:
+    image: prom/prometheus:v3.15.0
+    container_name: prometheus
+    restart: unless-stopped
+    networks:
+      - observability
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=15d
+      - --storage.tsdb.retention.size=2GB
+      - --web.enable-remote-write-receiver
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:9090/-/ready"]
+      interval: 30s
+      timeout: 5s
+      retries: 3

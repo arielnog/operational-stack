@@ -18,8 +18,11 @@ accessLog:
   format: json
 
 entryPoints:
+  # asDefault: router sem entrypoints explícitos fica só em web/websecure,
+  # nunca na de métricas.
   web:
     address: ":80"
+    asDefault: true
     http:
       redirections:
         entryPoint:
@@ -29,6 +32,7 @@ entryPoints:
 
   websecure:
     address: ":443"
+    asDefault: true
     http:
       tls:
         certResolver: cloudflare
@@ -38,6 +42,16 @@ entryPoints:
               - "*.{{ env \"DOMAIN\" }}"
       middlewares:
         - secHeaders@file
+
+  # Métricas Prometheus — só na rede traefik_public, sem porta no host
+  metrics:
+    address: ":8082"
+
+metrics:
+  prometheus:
+    entryPoint: metrics
+    addRoutersLabels: true
+    addServicesLabels: true
 
 certificatesResolvers:
   cloudflare:

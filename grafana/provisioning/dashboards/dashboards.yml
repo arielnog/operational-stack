@@ -1,0 +1,15 @@
+# grafana/provisioning/dashboards/dashboards.yml
+# Carrega os JSONs de grafana/dashboards (montado em /var/lib/grafana/dashboards)
+# na pasta "Infra". Edite os arquivos, não a UI: relidos a cada 30 s.
+
+apiVersion: 1
+
+providers:
+  - name: infra
+    folder: Infra
+    type: file
+    disableDeletion: false
+    allowUiUpdates: false
+    updateIntervalSeconds: 30
+    options:
+      path: /var/lib/grafana/dashboards

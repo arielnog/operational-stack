@@ -1,0 +1,237 @@
+// Métricas: exporters embutidos no Alloy → Prometheus (remote_write).
+// Fazem o papel dos containers node-exporter, cAdvisor, blackbox,
+// postgres-exporter e redis-exporter, gastando bem menos RAM.
+// O instance fica fixo para não mudar quando o container do Alloy é recriado.
+
+prometheus.remote_write "default" {
+	endpoint {
+		url = "http://prometheus:9090/api/v1/write"
+	}
+}
+
+// ── node: CPU, RAM e disco da VPS ─────────────────────────────────
+prometheus.exporter.unix "node" {
+	procfs_path = "/host/proc"
+	sysfs_path  = "/sys"
+	rootfs_path = "/rootfs"
+	// O Alloy não roda na rede do host: esses coletores mostrariam a rede do
+	// próprio container. Tráfego por container vem do cAdvisor.
+	disable_collectors = ["netdev", "netstat", "sockstat"]
+}
+
+discovery.relabel "node" {
+	targets = prometheus.exporter.unix.node.targets
+
+	rule {
+		target_label = "job"
+		replacement  = "node"
+	}
+
+	rule {
+		target_label = "instance"
+		replacement  = "vps"
+	}
+}
+
+prometheus.scrape "node" {
+	targets         = discovery.relabel.node.output
+	scrape_interval = "30s"
+	forward_to      = [prometheus.remote_write.default.receiver]
+}
+
+// ── cadvisor: CPU e RAM por container ─────────────────────────────
+prometheus.exporter.cadvisor "containers" {
+	docker_only            = true
+	store_container_labels = false
+}
+
+discovery.relabel "cadvisor" {
+	targets = prometheus.exporter.cadvisor.containers.targets
+
+	rule {
+		target_label = "job"
+		replacement  = "cadvisor"
+	}
+
+	rule {
+		target_label = "instance"
+		replacement  = "vps"
+	}
+}
+
+prometheus.scrape "cadvisor" {
+	targets         = discovery.relabel.cadvisor.output
+	scrape_interval = "30s"
+	forward_to      = [prometheus.remote_write.default.receiver]
+}
+
+// ── health: probes HTTP nas URLs internas (blackbox) ──────────────
+// instance = nome da app. Apps sem HTTP (youtube crawler, telegram reader)
+// ficam de fora; para elas vale o painel de containers reiniciados.
+prometheus.exporter.blackbox "health" {
+	config = "{ modules: { http_2xx: { prober: http, timeout: 5s } } }"
+
+	target {
+		name    = "notification-price-promotions"
+		address = "http://notification-price-worker-promotions:9501/health"
+		module  = "http_2xx"
+	}
+
+	target {
+		name    = "notification-price-sender"
+		address = "http://notification-price-worker-sender:9501/health"
+		module  = "http_2xx"
+	}
+
+	target {
+		name    = "notification-price-maintenance"
+		address = "http://notification-price-worker-maintenance:9501/health"
+		module  = "http_2xx"
+	}
+
+	target {
+		name    = "notification-price-commands"
+		address = "http://notification-price-worker-commands:9501/health"
+		module  = "http_2xx"
+	}
+
+	target {
+		name    = "evolution-api"
+		address = "http://evolution_api:8000/"
+		module  = "http_2xx"
+	}
+
+	target {
+		name    = "financas"
+		address = "http://financas/"
+		module  = "http_2xx"
+	}
+
+	target {
+		name    = "metabase"
+		address = "http://metabase:3000/api/health"
+		module  = "http_2xx"
+	}
+
+	target {
+		name    = "grafana"
+		address = "http://grafana:3000/api/health"
+		module  = "http_2xx"
+	}
+
+	target {
+		name    = "loki"
+		address = "http://loki:3100/ready"
+		module  = "http_2xx"
+	}
+
+	target {
+		name    = "rabbitmq"
+		address = "http://rabbitmq:15672/"
+		module  = "http_2xx"
+	}
+
+	target {
+		name    = "traefik"
+		address = "http://traefik:8080/ping"
+		module  = "http_2xx"
+	}
+}
+
+discovery.relabel "health" {
+	targets = prometheus.exporter.blackbox.health.targets
+
+	rule {
+		source_labels = ["job"]
+		regex         = "integrations/blackbox/(.*)"
+		target_label  = "instance"
+	}
+
+	rule {
+		target_label = "job"
+		replacement  = "health"
+	}
+}
+
+prometheus.scrape "health" {
+	targets         = discovery.relabel.health.output
+	scrape_interval = "30s"
+	forward_to      = [prometheus.remote_write.default.receiver]
+}
+
+// ── redis ─────────────────────────────────────────────────────────
+prometheus.exporter.redis "redis" {
+	redis_addr     = "redis:6379"
+	redis_password = sys.env("REDIS_PASSWORD")
+}
+
+discovery.relabel "redis" {
+	targets = prometheus.exporter.redis.redis.targets
+
+	rule {
+		target_label = "job"
+		replacement  = "redis"
+	}
+
+	rule {
+		target_label = "instance"
+		replacement  = "redis"
+	}
+}
+
+prometheus.scrape "redis" {
+	targets         = discovery.relabel.redis.output
+	scrape_interval = "30s"
+	forward_to      = [prometheus.remote_write.default.receiver]
+}
+
+// ── postgres: um exporter por banco (só o 1º DSN de cada um é lido) ─
+// Usuário monitor com a role pg_monitor; senha no .env.
+prometheus.exporter.postgres "notification_price_db" {
+	data_source_names = ["postgresql://monitor:" + sys.env("POSTGRES_MONITOR_PASSWORD") + "@notification-price-db:5432/postgres?sslmode=disable"]
+}
+
+prometheus.exporter.postgres "evolution_db" {
+	data_source_names = ["postgresql://monitor:" + sys.env("POSTGRES_MONITOR_PASSWORD") + "@evolution-db:5432/postgres?sslmode=disable"]
+}
+
+prometheus.exporter.postgres "metabase_db" {
+	data_source_names = ["postgresql://monitor:" + sys.env("POSTGRES_MONITOR_PASSWORD") + "@metabase-db:5432/postgres?sslmode=disable"]
+}
+
+// instance = nome do container do banco (vem como postgresql://host:5432/db)
+discovery.relabel "postgres" {
+	targets = array.concat(
+		prometheus.exporter.postgres.notification_price_db.targets,
+		prometheus.exporter.postgres.evolution_db.targets,
+		prometheus.exporter.postgres.metabase_db.targets,
+	)
+
+	rule {
+		source_labels = ["instance"]
+		regex         = "postgresql://([^:/]+).*"
+		target_label  = "instance"
+	}
+
+	rule {
+		target_label = "job"
+		replacement  = "postgres"
+	}
+}
+
+prometheus.scrape "postgres" {
+	targets         = discovery.relabel.postgres.output
+	scrape_interval = "30s"
+	forward_to      = [prometheus.remote_write.default.receiver]
+}
+
+// ── traefik: requests, 5xx, latência e validade dos certificados ──
+prometheus.scrape "traefik" {
+	targets = [{
+		__address__ = "traefik:8082",
+		instance    = "traefik",
+	}]
+	job_name        = "traefik"
+	scrape_interval = "30s"
+	forward_to      = [prometheus.remote_write.default.receiver]
+}
