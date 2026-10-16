@@ -184,3 +184,43 @@ prometheus.scrape "redis" {
 	scrape_interval = "30s"
 	forward_to      = [prometheus.remote_write.default.receiver]
 }
+
+// ── postgres: um exporter por banco (só o 1º DSN de cada um é lido) ─
+// Usuário monitor com a role pg_monitor; senha no .env.
+prometheus.exporter.postgres "notification_price_db" {
+	data_source_names = ["postgresql://monitor:" + sys.env("POSTGRES_MONITOR_PASSWORD") + "@notification-price-db:5432/postgres?sslmode=disable"]
+}
+
+prometheus.exporter.postgres "evolution_db" {
+	data_source_names = ["postgresql://monitor:" + sys.env("POSTGRES_MONITOR_PASSWORD") + "@evolution-db:5432/postgres?sslmode=disable"]
+}
+
+prometheus.exporter.postgres "metabase_db" {
+	data_source_names = ["postgresql://monitor:" + sys.env("POSTGRES_MONITOR_PASSWORD") + "@metabase-db:5432/postgres?sslmode=disable"]
+}
+
+// instance = nome do container do banco (vem como postgresql://host:5432/db)
+discovery.relabel "postgres" {
+	targets = array.concat(
+		prometheus.exporter.postgres.notification_price_db.targets,
+		prometheus.exporter.postgres.evolution_db.targets,
+		prometheus.exporter.postgres.metabase_db.targets,
+	)
+
+	rule {
+		source_labels = ["instance"]
+		regex         = "postgresql://([^:/]+).*"
+		target_label  = "instance"
+	}
+
+	rule {
+		target_label = "job"
+		replacement  = "postgres"
+	}
+}
+
+prometheus.scrape "postgres" {
+	targets         = discovery.relabel.postgres.output
+	scrape_interval = "30s"
+	forward_to      = [prometheus.remote_write.default.receiver]
+}
