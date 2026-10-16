@@ -1,0 +1,5 @@
+(Warning) If you have a tracing set up for Promtail, it cannot be migrated to Alloy automatically. Refer to the documentation on how to configure tracing in Alloy.
+(Warning) Alloy's metrics are different from the metrics emitted by Promtail. If you rely on Promtail's metrics, you must change your configuration, for example, your alerts and dashboards.
+(Warning) The converter does not support converting the provided server.log_level config: The equivalent feature in Alloy is to use the logging config block to set the level argument.
+
+A configuration file was generated successfully.
