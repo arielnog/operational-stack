@@ -5,7 +5,7 @@ version: "3.9"
 #  Arquitetura: docs/ARCHITECTURE.md
 #
 #  Serviços: Traefik · Metabase (banco próprio) · Grafana
-#            Loki · Promtail · Redis
+#            Loki · Alloy · Redis
 #
 #  Sem Postgres global — cada app sobe seu próprio banco
 # =============================================================
@@ -15,7 +15,7 @@ networks:
   traefik_public:
     external: true
 
-  # Comunicação interna — Redis, Loki, Promtail, Grafana, apps
+  # Comunicação interna — Redis, Loki, Alloy, Grafana, apps
   infra_internal:
     external: true
 
@@ -250,25 +250,6 @@ services:
       timeout: 5s
       retries: 10
       start_period: 60s
-
-  # -----------------------------------------------------------
-  # PROMTAIL — Coleta e envia logs para o Loki
-  # -----------------------------------------------------------
-  promtail:
-    image: grafana/promtail:2.9.7   # ✅ mesma versão do Loki
-    container_name: promtail
-    restart: unless-stopped
-    networks:
-      - infra_internal
-    volumes:
-      - /var/log:/var/log:ro
-      - /var/lib/docker/containers:/var/lib/docker/containers:ro
-      - /var/run/docker.sock:/var/run/docker.sock:ro  # ✅ read-only é suficiente
-      - ./promtail/promtail.yml:/etc/promtail/promtail.yml:ro
-    command: -config.file=/etc/promtail/promtail.yml
-    depends_on:
-      loki:
-        condition: service_healthy
 
   # -----------------------------------------------------------
   # ALLOY — Substituto do Promtail (EOL). Mesmos labels no Loki.
