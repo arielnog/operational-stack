@@ -33,6 +33,13 @@ http:
           - secHeaders
           - rateLimit
 
+    # Só aceita origem no tailnet (*.int). Barra quem bate no IP público
+    # com Host: <svc>.int..., já que portas publicadas pelo Docker ignoram o UFW
+    tailnet-only:
+      ipAllowList:
+        sourceRange:
+          - 100.64.0.0/10
+
 tls:
   options:
     default:
