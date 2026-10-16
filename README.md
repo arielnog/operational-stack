@@ -417,6 +417,7 @@ docker exec <app>-db pg_dump -U <usuario> <banco> > backup_<app>_$(date +%Y%m%d)
 - **Logs de containers** — Alloy coleta automaticamente via Docker socket
 - **Métricas** — o Alloy faz o papel de node-exporter, cAdvisor, blackbox, postgres e redis exporter e manda para o Prometheus (15 dias). O Traefik expõe métricas na `:8082` só dentro da rede
 - **Dashboards** — Grafana → pasta **Infra** → **Visão Geral** (health, tráfego, recursos, logs). Edite os JSONs em `grafana/dashboards/`, não a UI
+- **Alertas** — 6 regras em `grafana/provisioning/alerting/alerting.yml` chegam no WhatsApp via Evolution (instância, token e número no `.env`). Se a própria Evolution cair, o alerta não chega
 - **App nova** — para aparecer no health, adicione um `target` em `alloy/metrics.alloy` com a URL interna do health e rode `docker restart alloy`
 - **Logs do host** — `/var/log/syslog` e `/var/log/auth.log` também coletados
 - **Visualização** — Grafana → Explore → selecione datasource Loki
