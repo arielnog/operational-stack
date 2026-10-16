@@ -64,3 +64,97 @@ prometheus.scrape "cadvisor" {
 	scrape_interval = "30s"
 	forward_to      = [prometheus.remote_write.default.receiver]
 }
+
+// ── health: probes HTTP nas URLs internas (blackbox) ──────────────
+// instance = nome da app. Apps sem HTTP (youtube crawler, telegram reader)
+// ficam de fora; para elas vale o painel de containers reiniciados.
+prometheus.exporter.blackbox "health" {
+	config = "{ modules: { http_2xx: { prober: http, timeout: 5s } } }"
+
+	target {
+		name    = "notification-price-promotions"
+		address = "http://notification-price-worker-promotions:9501/health"
+		module  = "http_2xx"
+	}
+
+	target {
+		name    = "notification-price-sender"
+		address = "http://notification-price-worker-sender:9501/health"
+		module  = "http_2xx"
+	}
+
+	target {
+		name    = "notification-price-maintenance"
+		address = "http://notification-price-worker-maintenance:9501/health"
+		module  = "http_2xx"
+	}
+
+	target {
+		name    = "notification-price-commands"
+		address = "http://notification-price-worker-commands:9501/health"
+		module  = "http_2xx"
+	}
+
+	target {
+		name    = "evolution-api"
+		address = "http://evolution_api:8000/"
+		module  = "http_2xx"
+	}
+
+	target {
+		name    = "financas"
+		address = "http://financas/"
+		module  = "http_2xx"
+	}
+
+	target {
+		name    = "metabase"
+		address = "http://metabase:3000/api/health"
+		module  = "http_2xx"
+	}
+
+	target {
+		name    = "grafana"
+		address = "http://grafana:3000/api/health"
+		module  = "http_2xx"
+	}
+
+	target {
+		name    = "loki"
+		address = "http://loki:3100/ready"
+		module  = "http_2xx"
+	}
+
+	target {
+		name    = "rabbitmq"
+		address = "http://rabbitmq:15672/"
+		module  = "http_2xx"
+	}
+
+	target {
+		name    = "traefik"
+		address = "http://traefik:8080/ping"
+		module  = "http_2xx"
+	}
+}
+
+discovery.relabel "health" {
+	targets = prometheus.exporter.blackbox.health.targets
+
+	rule {
+		source_labels = ["job"]
+		regex         = "integrations/blackbox/(.*)"
+		target_label  = "instance"
+	}
+
+	rule {
+		target_label = "job"
+		replacement  = "health"
+	}
+}
+
+prometheus.scrape "health" {
+	targets         = discovery.relabel.health.output
+	scrape_interval = "30s"
+	forward_to      = [prometheus.remote_write.default.receiver]
+}

@@ -265,8 +265,12 @@ services:
     image: grafana/alloy:v1.20.1
     container_name: alloy
     restart: unless-stopped
+    # observability: Loki e Prometheus. Demais redes: alcançar apps, Redis,
+    # bancos e Traefik para os probes e exporters.
     networks:
       - observability
+      - infra_internal
+      - traefik_public
     # Carrega todos os .alloy da pasta (logs.alloy, metrics.alloy)
     command: run /etc/alloy --server.http.listen-addr=0.0.0.0:12345 --storage.path=/var/lib/alloy/data
     # cgroup do host: o cAdvisor precisa enxergar os cgroups de todos os containers
@@ -283,6 +287,7 @@ services:
       - /sys:/sys:ro
       - /var/lib/docker:/var/lib/docker:ro
       - /dev/disk:/dev/disk:ro
+      - /run/udev/data:/run/udev/data:ro
     depends_on:
       loki:
         condition: service_healthy
