@@ -224,3 +224,14 @@ prometheus.scrape "postgres" {
 	scrape_interval = "30s"
 	forward_to      = [prometheus.remote_write.default.receiver]
 }
+
+// ── traefik: requests, 5xx, latência e validade dos certificados ──
+prometheus.scrape "traefik" {
+	targets = [{
+		__address__ = "traefik:8082",
+		instance    = "traefik",
+	}]
+	job_name        = "traefik"
+	scrape_interval = "30s"
+	forward_to      = [prometheus.remote_write.default.receiver]
+}
