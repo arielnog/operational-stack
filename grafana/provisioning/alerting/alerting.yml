@@ -18,7 +18,7 @@ templates:
       {{- end }}
 
       {{ define "whatsapp.payload" -}}
-      {{ coll.Dict "number" .Vars.number "text" (tmpl.Exec "whatsapp.text" .) | data.ToJSON }}
+      {{ coll.Dict "number" (reReplaceAll "^tel:" "" .Vars.number) "text" (tmpl.Exec "whatsapp.text" .) | data.ToJSON }}
       {{- end }}
 
 # ── Para onde vai ────────────────────────────────────────────────────
@@ -37,7 +37,9 @@ contactPoints:
           payload:
             template: '{{ template "whatsapp.payload" . }}'
             vars:
-              number: "${ALERT_WHATSAPP_NUMBER}"
+              # "tel:" mantém o valor como texto (só número vira int e quebra o
+              # provisioning); o template remove o prefixo.
+              number: "tel:${ALERT_WHATSAPP_NUMBER}"
 
 policies:
   - orgId: 1
