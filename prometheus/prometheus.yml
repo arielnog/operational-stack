@@ -1,0 +1,11 @@
+# prometheus.yml — Só armazena. Quem coleta é o Alloy (exporters embutidos),
+# que manda tudo via remote_write. Ver alloy/config.alloy.
+
+global:
+  scrape_interval: 30s
+  evaluation_interval: 30s
+
+scrape_configs:
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]

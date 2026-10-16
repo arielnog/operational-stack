@@ -1,0 +1,66 @@
+// Métricas: exporters embutidos no Alloy → Prometheus (remote_write).
+// Fazem o papel dos containers node-exporter, cAdvisor, blackbox,
+// postgres-exporter e redis-exporter, gastando bem menos RAM.
+// O instance fica fixo para não mudar quando o container do Alloy é recriado.
+
+prometheus.remote_write "default" {
+	endpoint {
+		url = "http://prometheus:9090/api/v1/write"
+	}
+}
+
+// ── node: CPU, RAM e disco da VPS ─────────────────────────────────
+prometheus.exporter.unix "node" {
+	procfs_path = "/host/proc"
+	sysfs_path  = "/sys"
+	rootfs_path = "/rootfs"
+	// O Alloy não roda na rede do host: esses coletores mostrariam a rede do
+	// próprio container. Tráfego por container vem do cAdvisor.
+	disable_collectors = ["netdev", "netstat", "sockstat"]
+}
+
+discovery.relabel "node" {
+	targets = prometheus.exporter.unix.node.targets
+
+	rule {
+		target_label = "job"
+		replacement  = "node"
+	}
+
+	rule {
+		target_label = "instance"
+		replacement  = "vps"
+	}
+}
+
+prometheus.scrape "node" {
+	targets         = discovery.relabel.node.output
+	scrape_interval = "30s"
+	forward_to      = [prometheus.remote_write.default.receiver]
+}
+
+// ── cadvisor: CPU e RAM por container ─────────────────────────────
+prometheus.exporter.cadvisor "containers" {
+	docker_only            = true
+	store_container_labels = false
+}
+
+discovery.relabel "cadvisor" {
+	targets = prometheus.exporter.cadvisor.containers.targets
+
+	rule {
+		target_label = "job"
+		replacement  = "cadvisor"
+	}
+
+	rule {
+		target_label = "instance"
+		replacement  = "vps"
+	}
+}
+
+prometheus.scrape "cadvisor" {
+	targets         = discovery.relabel.cadvisor.output
+	scrape_interval = "30s"
+	forward_to      = [prometheus.remote_write.default.receiver]
+}
