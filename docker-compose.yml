@@ -166,6 +166,10 @@ services:
       GF_SERVER_DOMAIN: grafana.int.${DOMAIN}
       GF_ANALYTICS_REPORTING_ENABLED: "false"
       GF_LOG_MODE: console
+      # Alertas via WhatsApp (grafana/provisioning/alerting/alerting.yml)
+      EVOLUTION_ALERT_INSTANCE: ${EVOLUTION_ALERT_INSTANCE}
+      EVOLUTION_ALERT_APIKEY: ${EVOLUTION_ALERT_APIKEY}
+      ALERT_WHATSAPP_NUMBER: ${ALERT_WHATSAPP_NUMBER}
     volumes:
       - grafana_data:/var/lib/grafana
       - ./grafana/provisioning:/etc/grafana/provisioning:ro
