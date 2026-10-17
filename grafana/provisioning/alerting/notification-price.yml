@@ -1,0 +1,189 @@
+# Regras de alerta do notification-price (F4.2, RN-20), no formato de provisionamento do Grafana.
+#
+# Copie para grafana/provisioning/alerting/notification-price.yml no operational-stack. As regras usam
+# o datasource do Loki pelo uid fixo de lá (P8E80F9AEF21F6940, em grafana/provisioning/datasources/).
+# O destino vem do alerting.yml do operational-stack: a política padrão manda tudo para o WhatsApp,
+# que só mostra o título e o summary. Evite "$" nos textos: o Grafana troca $VAR por variável de ambiente.
+apiVersion: 1
+
+groups:
+  - orgId: 1
+    name: notification-price
+    folder: notification-price
+    interval: 1m
+    rules:
+      # RN-20: nenhuma promo chegou na última hora. Costuma ser o telegram-reader parado ou sem sessão.
+      - uid: np-no-promo-1h
+        title: Nenhuma promo em 1 h
+        condition: C
+        for: 5m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+          app: notification-price
+        annotations:
+          summary: Nenhuma promo dos canais há mais de 1 h.
+          description: Verifique o telegram-reader (runbook "Sem promos" no README).
+        data:
+          - refId: A
+            relativeTimeRange: { from: 600, to: 0 }
+            datasourceUid: P8E80F9AEF21F6940
+            model:
+              refId: A
+              queryType: instant
+              expr: 'max(max_over_time({container=~"notification-price-worker-.*"} |= `"message":"metrics.snapshot"` | json | unwrap context_last_promotion_age_s [5m]))'
+          - refId: B
+            datasourceUid: __expr__
+            model: { refId: B, type: reduce, expression: A, reducer: last }
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator: { type: gt, params: [3600] }
+
+      # O worker-maintenance grava metrics.snapshot a cada minuto. Sem snapshot em 5 min, ele caiu.
+      - uid: np-worker-down
+        title: Worker de manutenção parado
+        condition: C
+        for: 2m
+        noDataState: Alerting
+        execErrState: Error
+        labels:
+          severity: critical
+          app: notification-price
+        annotations:
+          summary: O worker-maintenance não registra métricas há 5 min.
+          description: Sem métricas nem recuperação de alertas. Verifique o container notification-price-worker-maintenance.
+        data:
+          - refId: A
+            relativeTimeRange: { from: 300, to: 0 }
+            datasourceUid: P8E80F9AEF21F6940
+            model:
+              refId: A
+              queryType: instant
+              expr: 'sum(count_over_time({container=~"notification-price-worker-.*"} |= `"message":"metrics.snapshot"` [5m]))'
+          - refId: B
+            datasourceUid: __expr__
+            model: { refId: B, type: reduce, expression: A, reducer: last }
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator: { type: lt, params: [1] }
+
+      # F4.2: fila parada há mais de 5 min (alerta pendente mais antigo).
+      - uid: np-queue-stuck
+        title: Fila de alertas parada
+        condition: C
+        for: 5m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: critical
+          app: notification-price
+        annotations:
+          summary: Há alerta pendente há mais de 5 min.
+          description: Verifique a instância bot e os logs de notification.retry (runbook "Fila parada").
+        data:
+          - refId: A
+            relativeTimeRange: { from: 600, to: 0 }
+            datasourceUid: P8E80F9AEF21F6940
+            model:
+              refId: A
+              queryType: instant
+              expr: 'max(max_over_time({container=~"notification-price-worker-.*"} |= `"message":"metrics.snapshot"` | json | unwrap context_oldest_pending_notification_s [5m]))'
+          - refId: B
+            datasourceUid: __expr__
+            model: { refId: B, type: reduce, expression: A, reducer: last }
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator: { type: gt, params: [300] }
+
+      # F4.2: mais de 5% dos envios da última hora terminaram em failed.
+      # Cada soma leva "or vector(0)": sem nenhum notification.sent na hora (a falha total), a soma
+      # vazia apagava a expressão inteira e o noDataState OK escondia a queda.
+      - uid: np-failed-rate
+        title: Taxa de falha de envio acima de 5%
+        condition: C
+        for: 10m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+          app: notification-price
+        annotations:
+          summary: Mais de 5% dos alertas da última hora falharam.
+          description: Normalmente a instância bot desconectada ou bloqueada (runbook "Falhas de envio").
+        data:
+          - refId: A
+            relativeTimeRange: { from: 3600, to: 0 }
+            datasourceUid: P8E80F9AEF21F6940
+            model:
+              refId: A
+              queryType: instant
+              expr: >-
+                (sum(count_over_time({container=~"notification-price-worker-.*"} |= `"message":"notification.failed"` [1h])) or vector(0))
+                / ((sum(count_over_time({container=~"notification-price-worker-.*"} |= `"message":"notification.sent"` [1h])) or vector(0))
+                + (sum(count_over_time({container=~"notification-price-worker-.*"} |= `"message":"notification.failed"` [1h])) or vector(0)))
+          - refId: B
+            datasourceUid: __expr__
+            model: { refId: B, type: reduce, expression: A, reducer: last }
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator: { type: gt, params: [0.05] }
+
+      # Fila de entrada sem consumidor em todos os snapshots dos últimos 5 min: o container do worker que
+      # a consome está parado. Pelo máximo da janela, um deploy (consumidor 0 por segundos) não dispara;
+      # -1 (API do RabbitMQ sem resposta) também não. Sem fila zerada, a consulta volta vazia (noData OK).
+      - uid: np-consumer-down
+        title: Consumidor do RabbitMQ parado
+        condition: C
+        for: 2m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: critical
+          app: notification-price
+        annotations:
+          summary: Uma fila de entrada do RabbitMQ está sem consumidor há 5 min.
+          description: Verifique notification-price-worker-promotions (promoções) e notification-price-worker-commands (mensagens do bot).
+        data:
+          - refId: A
+            relativeTimeRange: { from: 600, to: 0 }
+            datasourceUid: P8E80F9AEF21F6940
+            model:
+              refId: A
+              queryType: instant
+              expr: >-
+                (max(max_over_time({container=~"notification-price-worker-.*"} |= `"message":"metrics.snapshot"` | json
+                | unwrap context_rabbitmq_promotions_consumers [5m])) == 0)
+                or (max(max_over_time({container=~"notification-price-worker-.*"} |= `"message":"metrics.snapshot"` | json
+                | unwrap context_rabbitmq_bot_consumers [5m])) == 0)
+          - refId: B
+            datasourceUid: __expr__
+            model: { refId: B, type: reduce, expression: A, reducer: last }
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator: { type: lt, params: [1] }

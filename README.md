@@ -32,6 +32,9 @@ vps-stack/
 ├── grafana/
 │   ├── dashboards/                 # JSONs da pasta "Infra" (Visão Geral e outros)
 │   └── provisioning/
+│       ├── alerting/
+│       │   ├── alerting.yml        # Alertas da infra, contact point e política (WhatsApp)
+│       │   └── notification-price.yml  # Alertas do notification-price (cópia do repositório dele)
 │       ├── dashboards/
 │       │   └── dashboards.yml      # Carrega grafana/dashboards
 │       └── datasources/
@@ -418,6 +421,7 @@ docker exec <app>-db pg_dump -U <usuario> <banco> > backup_<app>_$(date +%Y%m%d)
 - **Métricas** — o Alloy faz o papel de node-exporter, cAdvisor, blackbox, postgres e redis exporter e manda para o Prometheus (15 dias). O Traefik expõe métricas na `:8082` só dentro da rede
 - **Dashboards** — Grafana → pasta **Infra** → **Visão Geral** (health, tráfego, recursos, logs). Edite os JSONs em `grafana/dashboards/`, não a UI
 - **Alertas** — 6 regras em `grafana/provisioning/alerting/alerting.yml` chegam no WhatsApp via Evolution (instância, token e número no `.env`). Se a própria Evolution cair, o alerta não chega
+- **Alertas das apps** — um arquivo por app em `grafana/provisioning/alerting/` (ex.: `notification-price.yml`, cópia de `ops/grafana/notification-price-alerts.yaml` daquele repositório), usando o uid do Loki daqui e a mesma política do WhatsApp. Depois de mudar um arquivo: `docker restart grafana`
 - **App nova** — para aparecer no health, adicione um `target` em `alloy/metrics.alloy` com a URL interna do health e rode `docker restart alloy`
 - **Logs do host** — `/var/log/syslog` e `/var/log/auth.log` também coletados
 - **Visualização** — Grafana → Explore → selecione datasource Loki
