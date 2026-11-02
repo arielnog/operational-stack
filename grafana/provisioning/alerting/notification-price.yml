@@ -187,3 +187,104 @@ groups:
               expression: B
               conditions:
                 - evaluator: { type: lt, params: [1] }
+
+      # F5e.10: o link-service grava links.heartbeat a cada minuto. Sem heartbeat em 5 min, o serviço caiu e todos os
+      # links dos alertas (promo.arnsolutions.tech) param de abrir.
+      - uid: np-links-down
+        title: Serviço de links parado
+        condition: C
+        for: 2m
+        noDataState: Alerting
+        execErrState: Error
+        labels:
+          severity: critical
+          app: notification-price
+        annotations:
+          summary: O link-service não dá sinal há 5 min. Os links dos alertas não abrem.
+          description: Verifique o container notification-price-link-service (docker compose up -d link-service). Para os alertas novos levarem o link da loja, OFFER_PAGE_ENABLED=false no .env e docker compose up -d.
+        data:
+          - refId: A
+            relativeTimeRange: { from: 300, to: 0 }
+            datasourceUid: P8E80F9AEF21F6940
+            model:
+              refId: A
+              queryType: instant
+              expr: 'sum(count_over_time({container="notification-price-link-service"} |= `"message":"links.heartbeat"` [5m]))'
+          - refId: B
+            datasourceUid: __expr__
+            model: { refId: B, type: reduce, expression: A, reducer: last }
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator: { type: lt, params: [1] }
+
+      # F5e.10: o link-service está de pé, mas o worker-api não responde: os cliques caem em "Tente de novo".
+      - uid: np-links-api-down
+        title: Página de oferta sem o worker-api
+        condition: C
+        for: 2m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: critical
+          app: notification-price
+        annotations:
+          summary: O link-service não alcança o worker-api. Os links dos alertas mostram "Tente de novo".
+          description: Verifique o container notification-price-worker-api (docker compose up -d worker-api).
+        data:
+          - refId: A
+            relativeTimeRange: { from: 300, to: 0 }
+            datasourceUid: P8E80F9AEF21F6940
+            model:
+              refId: A
+              queryType: instant
+              expr: 'sum(count_over_time({container="notification-price-link-service"} |= `"message":"links.heartbeat"` | json | context_hyperf="false" [5m]))'
+          - refId: B
+            datasourceUid: __expr__
+            model: { refId: B, type: reduce, expression: A, reducer: last }
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator: { type: gt, params: [2] }
+
+      # Fase 5e: o gerador do Mercado Livre recusou a sessão. Os cliques do ML vão para o link da loja, sem afiliado,
+      # até trocar o cookie.
+      - uid: np-ml-session-expired
+        title: Sessão do Mercado Livre expirou
+        condition: C
+        for: 0m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+          app: notification-price
+        annotations:
+          summary: A sessão do Mercado Livre expirou. Os cliques do ML saem sem o link de afiliado.
+          description: Troque AFFILIATE_MERCADOLIVRE_COOKIE no .env (README, "Sessão do Mercado Livre expirou") e rode docker compose up -d link-service.
+        data:
+          - refId: A
+            relativeTimeRange: { from: 1800, to: 0 }
+            datasourceUid: P8E80F9AEF21F6940
+            model:
+              refId: A
+              queryType: instant
+              expr: 'sum(count_over_time({container="notification-price-link-service"} |= `"message":"affiliate.fallback"` |= `"reason":"session_expired"` [30m]))'
+          - refId: B
+            datasourceUid: __expr__
+            model: { refId: B, type: reduce, expression: A, reducer: last }
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator: { type: gt, params: [0] }
