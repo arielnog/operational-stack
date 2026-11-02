@@ -2,6 +2,11 @@
 # Alertas da pasta Infra → WhatsApp via Evolution API (instância e token no .env).
 # Evite "$" nos textos: o Grafana troca $VAR por variável de ambiente neste arquivo.
 # Por isso as anotações usam {{ .Labels.x }} em vez de {{ $labels.x }}.
+#
+# Toda regra (deste repositório ou das aplicações) leva duas labels, que viram a origem na mensagem:
+#   app:       a aplicação (notification-price, financas...; "infra" para VPS, Traefik, disco)
+#   container: o container de onde vem o problema; pode vir da query ('{{ index .Labels "name" }}')
+# e a severity: critical vira 🚨 INCIDENTE; warning vira ⚠️ AVISO.
 
 apiVersion: 1
 
@@ -12,8 +17,16 @@ templates:
     template: |
       {{ define "whatsapp.text" -}}
       {{ range .Alerts -}}
-      {{ if eq .Status "firing" }}🔴{{ else }}✅ Resolvido:{{ end }} *{{ .Labels.alertname }}*
-      {{ .Annotations.summary }}
+      {{ if eq .Labels.severity "warning" -}}
+      {{ if eq .Status "firing" }}⚠️ *ALERTA - AVISO* ⚠️{{ else }}✅ *AVISO RESOLVIDO* ✅{{ end }}
+      {{- else -}}
+      {{ if eq .Status "firing" }}🚨 *ALERTA - INCIDENTE* 🚨{{ else }}✅ *INCIDENTE RESOLVIDO* ✅{{ end }}
+      {{- end }}
+
+      - *Aplicação:* {{ or .Labels.app "não informada" }}
+      - *Container:* {{ or .Labels.container "não informado" }}
+      - *Mensagem:* {{ .Annotations.summary }}
+
       {{ end -}}
       {{- end }}
 
@@ -65,6 +78,8 @@ groups:
         execErrState: Error
         labels:
           severity: critical
+          app: infra
+          container: '{{ index .Labels "instance" }}'
         annotations:
           summary: "{{ .Labels.instance }} não responde no health interno."
         data:
@@ -92,6 +107,8 @@ groups:
         execErrState: Error
         labels:
           severity: warning
+          app: infra
+          container: traefik
         annotations:
           summary: "{{ .Labels.service }} com mais de 5% de respostas 5xx."
         data:
@@ -123,6 +140,8 @@ groups:
         execErrState: Error
         labels:
           severity: critical
+          app: infra
+          container: host (disco da VPS)
         annotations:
           summary: "Menos de 15% livre no disco / da VPS."
         data:
@@ -150,6 +169,8 @@ groups:
         execErrState: Error
         labels:
           severity: warning
+          app: infra
+          container: traefik
         annotations:
           summary: "Certificado {{ .Labels.cn }} vence em menos de 14 dias."
         data:
@@ -177,6 +198,8 @@ groups:
         execErrState: Error
         labels:
           severity: warning
+          app: infra
+          container: '{{ index .Labels "name" }}'
         annotations:
           summary: "{{ .Labels.name }} reiniciou 2 ou mais vezes em 15 min."
         data:
@@ -204,6 +227,8 @@ groups:
         execErrState: Error
         labels:
           severity: warning
+          app: infra
+          container: '{{ index .Labels "instance" }}'
         annotations:
           summary: "Job {{ .Labels.job }} ({{ .Labels.instance }}) com up == 0."
         data:

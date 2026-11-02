@@ -18,6 +18,8 @@ groups:
         execErrState: Error
         labels:
           severity: critical
+          app: operational-stack
+          container: db-backup
         annotations:
           summary: O backup diário falhou em algum alvo. Veja o backup.failed do container db-backup no Loki.
         data:
@@ -49,6 +51,8 @@ groups:
         execErrState: Error
         labels:
           severity: critical
+          app: operational-stack
+          container: db-backup
         annotations:
           summary: Nenhum backup terminou nas últimas 26 h. Verifique o container db-backup.
         data:
@@ -80,6 +84,8 @@ groups:
         execErrState: Error
         labels:
           severity: warning
+          app: operational-stack
+          container: db-backup
         annotations:
           summary: O último backup ficou só na VPS (sem BACKUP_REMOTE ou rclone.conf).
         data:
@@ -89,7 +95,9 @@ groups:
             model:
               refId: A
               queryType: instant
-              expr: 'sum(count_over_time({container="db-backup"} |= `"message":"backup.offsite_skipped"` [26h]))'
+              # O último backup.finished da janela diz se houve cópia externa (offsite). Contar os offsite_skipped
+              # da janela deixava o alerta aceso por 26 h mesmo com os backups seguintes já no Drive.
+              expr: 'last_over_time({container="db-backup"} |= `"message":"backup.finished"` | json | label_format offsite_n=`{{ if eq .context_offsite "true" }}1{{ else }}0{{ end }}` | unwrap offsite_n [26h]) by (container)'
           - refId: B
             datasourceUid: __expr__
             model: { refId: B, type: reduce, expression: A, reducer: last }
@@ -100,4 +108,4 @@ groups:
               type: threshold
               expression: B
               conditions:
-                - evaluator: { type: gt, params: [0] }
+                - evaluator: { type: lt, params: [1] }

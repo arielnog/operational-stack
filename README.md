@@ -430,7 +430,7 @@ O container `db-backup` (`backup/`) roda todo dia às 06:00 UTC (03:00 BRT):
 - **Senhas da criptografia:** estão no `rclone.conf` (ofuscadas) e **no gerenciador de senhas**. Sem elas, os backups
   do Drive não abrem.
 - **Alertas** (`grafana/provisioning/alerting/backup.yml`): "Backup falhou", "Backup atrasado" (nada terminou em
-  26 h) e "Backup sem cópia externa". Os logs são `backup.done`, `backup.failed`, `backup.offsite` e
+  26 h) e "Backup sem cópia externa" (o último backup ficou só na VPS; apaga no próximo que subir). Os logs são `backup.done`, `backup.failed`, `backup.offsite` e
   `backup.finished`, no container `db-backup`.
 - **Fora do backup:** Redis (o índice de termos do notification-price se refaz com `keywords:reindex`), RabbitMQ
   (filas de passagem) e Loki/Prometheus (histórico de observabilidade).
@@ -469,6 +469,18 @@ Teste de restauração: rode o passo 2 num Postgres de teste e compare as contag
 - **Dashboards** — Grafana → pasta **Infra** → **Visão Geral** (health, tráfego, recursos, logs). Edite os JSONs em `grafana/dashboards/`, não a UI
 - **Alertas** — 6 regras em `grafana/provisioning/alerting/alerting.yml` chegam no WhatsApp via Evolution (instância, token e número no `.env`). Se a própria Evolution cair, o alerta não chega
 - **Alertas das apps** — um arquivo por app em `grafana/provisioning/alerting/` (ex.: `notification-price.yml`, cópia de `ops/grafana/notification-price-alerts.yaml` daquele repositório), usando o uid do Loki daqui e a mesma política do WhatsApp. Depois de mudar um arquivo: `docker restart grafana`
+- **Mensagem do alerta** — o template `whatsapp` (em `alerting.yml`) monta, para cada alerta, a origem e o resumo:
+
+  ```text
+  🚨 *ALERTA - INCIDENTE* 🚨        (severity critical; ao resolver, ✅ *INCIDENTE RESOLVIDO* ✅)
+  ⚠️ *ALERTA - AVISO* ⚠️            (severity warning; ao resolver, ✅ *AVISO RESOLVIDO* ✅)
+
+  - *Aplicação:* notification-price
+  - *Container:* notification-price-worker-sender
+  - *Mensagem:* Há alerta pendente há mais de 5 min.
+  ```
+
+  Toda regra nova leva a `severity` (`critical` ou `warning`), as labels `app` (a aplicação; `infra` para VPS, Traefik e disco) e `container` (de onde vem o problema; pode vir da query, como `'{{ index .Labels "name" }}'`), e a anotação `summary` (a mensagem). Sem as labels, a mensagem sai com "não informada".
 - **App nova** — para aparecer no health, adicione um `target` em `alloy/metrics.alloy` com a URL interna do health e rode `docker restart alloy`
 - **Logs do host** — `/var/log/syslog` e `/var/log/auth.log` também coletados
 - **Visualização** — Grafana → Explore → selecione datasource Loki

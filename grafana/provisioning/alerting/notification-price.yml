@@ -5,7 +5,8 @@
 # o datasource do Loki pelo uid fixo de lá (P8E80F9AEF21F6940, em grafana/provisioning/datasources/); o
 # "Container do notification-price parado" usa o Prometheus (uid prometheus, métricas do cAdvisor no Alloy).
 # O destino vem do alerting.yml do operational-stack: a política padrão manda tudo para o WhatsApp,
-# que só mostra o título e o summary. Evite "$" nos textos: o Grafana troca $VAR por variável de ambiente.
+# que mostra a aplicação (label app), o container (label container) e o summary.
+# Evite "$" nos textos: o Grafana troca $VAR por variável de ambiente.
 apiVersion: 1
 
 # Regra tirada do arquivo continua no Grafana: o deleteRules apaga (F6.5).
@@ -29,6 +30,7 @@ groups:
         labels:
           severity: critical
           app: notification-price
+          container: notification-price-worker-maintenance
         annotations:
           summary: O worker-maintenance não registra métricas há 5 min.
           description: Sem métricas nem recuperação de alertas. Verifique o container notification-price-worker-maintenance.
@@ -62,6 +64,7 @@ groups:
         labels:
           severity: critical
           app: notification-price
+          container: notification-price-worker-sender
         annotations:
           summary: Há alerta pendente há mais de 5 min.
           description: Verifique a instância bot e os logs de notification.retry (runbook "Fila parada").
@@ -97,6 +100,7 @@ groups:
         labels:
           severity: warning
           app: notification-price
+          container: notification-price-worker-sender
         annotations:
           summary: Mais de 5% dos alertas da última hora falharam.
           description: Normalmente a instância bot desconectada ou bloqueada (runbook "Falhas de envio").
@@ -127,7 +131,7 @@ groups:
       # a consome está parado. Pelo máximo da janela, um deploy (consumidor 0 por segundos) não dispara;
       # -1 (API do RabbitMQ sem resposta) também não. Sem fila zerada, a consulta volta vazia (noData OK).
       - uid: np-consumer-down
-        title: Consumidor do RabbitMQ parado
+        title: Consumidor do RabbitMQ parado (promoções)
         condition: C
         for: 2m
         noDataState: OK
@@ -135,9 +139,10 @@ groups:
         labels:
           severity: critical
           app: notification-price
+          container: notification-price-worker-promotions
         annotations:
-          summary: Uma fila de entrada do RabbitMQ está sem consumidor há 5 min.
-          description: Verifique notification-price-worker-promotions (promoções) e notification-price-worker-commands (mensagens do bot).
+          summary: A fila de promoções do RabbitMQ está sem consumidor há 5 min.
+          description: Verifique o container notification-price-worker-promotions (docker compose up -d).
         data:
           - refId: A
             relativeTimeRange: { from: 600, to: 0 }
@@ -145,11 +150,40 @@ groups:
             model:
               refId: A
               queryType: instant
-              expr: >-
-                (max(max_over_time({container=~"notification-price-worker-.*"} |= `"message":"metrics.snapshot"` | json
-                | unwrap context_rabbitmq_promotions_consumers [5m])) == 0)
-                or (max(max_over_time({container=~"notification-price-worker-.*"} |= `"message":"metrics.snapshot"` | json
-                | unwrap context_rabbitmq_bot_consumers [5m])) == 0)
+              expr: 'max(max_over_time({container=~"notification-price-worker-.*"} |= `"message":"metrics.snapshot"` | json | unwrap context_rabbitmq_promotions_consumers [5m])) == 0'
+          - refId: B
+            datasourceUid: __expr__
+            model: { refId: B, type: reduce, expression: A, reducer: last }
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator: { type: lt, params: [1] }
+
+      - uid: np-consumer-down-bot
+        title: Consumidor do RabbitMQ parado (comandos)
+        condition: C
+        for: 2m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: critical
+          app: notification-price
+          container: notification-price-worker-commands
+        annotations:
+          summary: A fila de mensagens do bot do RabbitMQ está sem consumidor há 5 min.
+          description: Verifique o container notification-price-worker-commands (docker compose up -d).
+        data:
+          - refId: A
+            relativeTimeRange: { from: 600, to: 0 }
+            datasourceUid: P8E80F9AEF21F6940
+            model:
+              refId: A
+              queryType: instant
+              expr: 'max(max_over_time({container=~"notification-price-worker-.*"} |= `"message":"metrics.snapshot"` | json | unwrap context_rabbitmq_bot_consumers [5m])) == 0'
           - refId: B
             datasourceUid: __expr__
             model: { refId: B, type: reduce, expression: A, reducer: last }
@@ -174,6 +208,7 @@ groups:
         labels:
           severity: critical
           app: notification-price
+          container: rabbitmq
         annotations:
           summary: O RabbitMQ não responde há 3 min. Promos e comandos do bot não entram.
           description: Verifique o container rabbitmq (operational-stack) e os logs telegram.publish_retry do telegram-reader (runbook "RabbitMQ fora").
@@ -201,7 +236,7 @@ groups:
       # últimos 10 min, então um lote do Telegram (que esvazia em segundos) não dispara. Até 02/11 nenhuma fila
       # passou de 0 por 10 min seguidos. -1 (API do RabbitMQ sem resposta) fica de fora: é o "RabbitMQ fora".
       - uid: np-backlog
-        title: Mensagens represadas
+        title: Mensagens represadas (promoções)
         condition: C
         for: 0m
         noDataState: OK
@@ -209,8 +244,9 @@ groups:
         labels:
           severity: critical
           app: notification-price
+          container: notification-price-worker-promotions
         annotations:
-          summary: Há mensagens paradas numa fila há 10 min (promos, comandos, match ou alertas).
+          summary: Há promoções paradas na fila de entrada ou no match há 10 min.
           description: Veja no dashboard qual fila cresce e o worker dela (runbook "Mensagens represadas").
         data:
           - refId: A
@@ -221,9 +257,75 @@ groups:
               queryType: instant
               expr: >-
                 (min(min_over_time({container=~"notification-price-worker-.*"} |= `"message":"metrics.snapshot"` | json | unwrap context_rabbitmq_promotions_messages [10m])) > 20)
-                or (min(min_over_time({container=~"notification-price-worker-.*"} |= `"message":"metrics.snapshot"` | json | unwrap context_rabbitmq_bot_messages [10m])) > 5)
                 or (min(min_over_time({container=~"notification-price-worker-.*"} |= `"message":"metrics.snapshot"` | json | unwrap context_queues_default_waiting [10m])) > 50)
-                or (min(min_over_time({container=~"notification-price-worker-.*"} |= `"message":"metrics.snapshot"` | json | unwrap context_queues_notifications_waiting [10m])) > 30)
+          - refId: B
+            datasourceUid: __expr__
+            model: { refId: B, type: reduce, expression: A, reducer: last }
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator: { type: gt, params: [0] }
+
+      - uid: np-backlog-bot
+        title: Mensagens represadas (comandos)
+        condition: C
+        for: 0m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: critical
+          app: notification-price
+          container: notification-price-worker-commands
+        annotations:
+          summary: Há mensagens do bot paradas na fila de entrada há 10 min.
+          description: Veja no dashboard qual fila cresce e o worker dela (runbook "Mensagens represadas").
+        data:
+          - refId: A
+            relativeTimeRange: { from: 900, to: 0 }
+            datasourceUid: P8E80F9AEF21F6940
+            model:
+              refId: A
+              queryType: instant
+              expr: >-
+                min(min_over_time({container=~"notification-price-worker-.*"} |= `"message":"metrics.snapshot"` | json | unwrap context_rabbitmq_bot_messages [10m])) > 5
+          - refId: B
+            datasourceUid: __expr__
+            model: { refId: B, type: reduce, expression: A, reducer: last }
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator: { type: gt, params: [0] }
+
+      - uid: np-backlog-sender
+        title: Mensagens represadas (envios)
+        condition: C
+        for: 0m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: critical
+          app: notification-price
+          container: notification-price-worker-sender
+        annotations:
+          summary: Há alertas e respostas parados na fila de envio há 10 min.
+          description: Veja no dashboard qual fila cresce e o worker dela (runbook "Mensagens represadas").
+        data:
+          - refId: A
+            relativeTimeRange: { from: 900, to: 0 }
+            datasourceUid: P8E80F9AEF21F6940
+            model:
+              refId: A
+              queryType: instant
+              expr: >-
+                min(min_over_time({container=~"notification-price-worker-.*"} |= `"message":"metrics.snapshot"` | json | unwrap context_queues_notifications_waiting [10m])) > 30
           - refId: B
             datasourceUid: __expr__
             model: { refId: B, type: reduce, expression: A, reducer: last }
@@ -247,6 +349,7 @@ groups:
         labels:
           severity: critical
           app: notification-price
+          container: notification-price-link-service
         annotations:
           summary: O link-service não dá sinal há 5 min. Os links dos alertas não abrem.
           description: Verifique o container notification-price-link-service (docker compose up -d link-service). Para os alertas novos levarem o link da loja, OFFER_PAGE_ENABLED=false no .env e docker compose up -d.
@@ -280,6 +383,7 @@ groups:
         labels:
           severity: critical
           app: notification-price
+          container: notification-price-worker-api
         annotations:
           summary: O link-service não alcança o worker-api. Os links dos alertas mostram "Tente de novo".
           description: Verifique o container notification-price-worker-api (docker compose up -d worker-api).
@@ -314,6 +418,7 @@ groups:
         labels:
           severity: warning
           app: notification-price
+          container: notification-price-link-service
         annotations:
           summary: A sessão do Mercado Livre expirou. Os cliques do ML saem sem o link de afiliado.
           description: Troque AFFILIATE_MERCADOLIVRE_COOKIE no .env (README, "Sessão do Mercado Livre expirou") e rode docker compose up -d link-service.
@@ -349,6 +454,7 @@ groups:
         labels:
           severity: warning
           app: notification-price
+          container: notification-price-link-service
         annotations:
           summary: O link de afiliado falhou em 2 ou mais cliques na última meia hora. Esses cliques saíram sem afiliado.
           description: Veja o motivo (reason) nos logs affiliate.fallback do notification-price-link-service (runbook "Erro no link de afiliado").
@@ -383,6 +489,7 @@ groups:
         labels:
           severity: warning
           app: notification-price
+          container: notification-price-worker-commands
         annotations:
           summary: 3 ou mais usuários removeram produto ou pausaram os alertas nas últimas 24 h.
           description: Veja quais termos e alertas vieram antes (runbook "Usuários parando"); o limite está em ops/grafana/notification-price-alerts.yaml.
@@ -412,6 +519,7 @@ groups:
       # coleta é a cada 30 s, então até ~60 s é normal); depois a série some, e a segunda parte pega o container que
       # rodou na última hora e não está mais lá. Um deploy (recria em segundos) não dispara. Testado em 02/11 parando
       # um container: dispara em ~3 min. Container tirado de propósito dispara por até 1 h: silencie no Grafana.
+      # Container avulso do docker compose run (migration, comando) termina sozinho e fica de fora (-run-).
       - uid: np-container-down
         title: Container do notification-price parado
         condition: C
@@ -421,8 +529,9 @@ groups:
         labels:
           severity: critical
           app: notification-price
+          container: '{{ index .Labels "name" }}'
         annotations:
-          summary: 'Container parado: {{ index .Labels "name" }}'
+          summary: O container parou ou foi removido (sem sinal do cAdvisor há mais de 2 min).
           description: docker ps -a e docker logs do container; para subir, docker compose up -d no /opt/notification-price.
         data:
           - refId: A
@@ -432,9 +541,9 @@ groups:
               refId: A
               instant: true
               expr: >-
-                (time() - max by (name) (container_last_seen{name=~"notification-price-.*"}) > 120)
-                or (max by (name) (max_over_time(container_last_seen{name=~"notification-price-.*"}[1h]))
-                unless max by (name) (container_last_seen{name=~"notification-price-.*"}))
+                (time() - max by (name) (container_last_seen{name=~"notification-price-.*", name!~".*-run-.*"}) > 120)
+                or (max by (name) (max_over_time(container_last_seen{name=~"notification-price-.*", name!~".*-run-.*"}[1h]))
+                unless max by (name) (container_last_seen{name=~"notification-price-.*", name!~".*-run-.*"}))
           - refId: C
             datasourceUid: __expr__
             model:
