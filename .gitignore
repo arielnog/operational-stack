@@ -1,3 +1,5 @@
 .env*
 !.env.example
 acme.json
+backup/rclone/*
+!backup/rclone/.gitkeep

@@ -409,9 +409,56 @@ ufw status verbose
 # Ver IPs bloqueados pelo Fail2Ban
 fail2ban-client status sshd
 
-# Backup do banco de uma app
-docker exec <app>-db pg_dump -U <usuario> <banco> > backup_<app>_$(date +%Y%m%d).sql
+# Backup agora (fora do horário do cron)
+docker exec db-backup sh -c 'backup.sh > /proc/1/fd/1 2>&1'
 ```
+
+## 💾 Backup
+
+O container `db-backup` (`backup/`) roda todo dia às 06:00 UTC (03:00 BRT):
+
+| O quê | Como |
+|---|---|
+| Postgres de `BACKUP_POSTGRES` (`notification-price-db`, `evolution-db`, `metabase-db`) | `pg_dump -Fc` pelo `docker exec`, conferido com `pg_restore --list` |
+| Sessão do WhatsApp da Evolution (volume `evolution-api_evolution_instances`) | `evolution-instances.tar.gz` |
+| `.env` de cada app em `/opt/*` | `env-files.tar.gz` |
+
+- **Local:** `/root/backups/daily/AAAA-MM-DD` (7 dias) e `/root/backups/weekly` (domingos, 4 semanas).
+- **Fora da VPS:** Google Drive, pasta `vps-backups`, pelo remote `gdrive-crypt:` do rclone. Nomes e conteúdo
+  sobem criptografados. A configuração (`backup/rclone/rclone.conf`) fica fora do git. O token do Drive tem escopo
+  `drive.file`: só enxerga o que o próprio rclone criou.
+- **Senhas da criptografia:** estão no `rclone.conf` (ofuscadas) e **no gerenciador de senhas**. Sem elas, os backups
+  do Drive não abrem.
+- **Alertas** (`grafana/provisioning/alerting/backup.yml`): "Backup falhou", "Backup atrasado" (nada terminou em
+  26 h) e "Backup sem cópia externa". Os logs são `backup.done`, `backup.failed`, `backup.offsite` e
+  `backup.finished`, no container `db-backup`.
+- **Fora do backup:** Redis (o índice de termos do notification-price se refaz com `keywords:reindex`), RabbitMQ
+  (filas de passagem) e Loki/Prometheus (histórico de observabilidade).
+
+### Token do Drive expirado ou revogado
+
+No seu computador: `rclone authorize "drive" "eyJzY29wZSI6ImRyaXZlLmZpbGUifQ"`. Troque o `token = ...` do
+`[gdrive]` no `backup/rclone/rclone.conf` pelo JSON novo e rode o backup à mão (comando acima).
+
+### Restaurar
+
+```bash
+# 1. Pegue o dump: local ou do Drive
+ls /root/backups/daily/
+docker exec db-backup rclone ls gdrive-crypt: --config /config/rclone/rclone.conf
+docker exec db-backup rclone cat gdrive-crypt:daily/AAAA-MM-DD/<container>.dump \
+  --config /config/rclone/rclone.conf > /root/restore.dump
+
+# 2. Pare quem escreve no banco (ex.: os workers do notification-price) e restaure por cima
+docker exec -i <container> sh -c 'pg_restore -U "$POSTGRES_USER" -d "$POSTGRES_DB" --clean --if-exists --no-owner' \
+  < /root/restore.dump
+
+# Arquivos: tar -xzf evolution-instances.tar.gz / env-files.tar.gz numa pasta temporária e copie o que precisar
+```
+
+VPS nova: instale o rclone, monte um `rclone.conf` com o `[gdrive]` (token novo) e o `[gdrive-crypt]` com as duas
+senhas do gerenciador (`rclone obscure <senha>`), baixe com `rclone copy gdrive-crypt:daily/AAAA-MM-DD .` e restaure.
+Teste de restauração: rode o passo 2 num Postgres de teste e compare as contagens (feito em 02/11/2026).
 
 ---
 
@@ -474,6 +521,7 @@ ufw status verbose
 
 ### Falha no backup do banco
 ```bash
-docker exec <app>-db pg_dump -U <usuario> <banco> > backup_<app>_$(date +%Y%m%d).sql
-# Verifique espaço em disco e permissões
+docker logs db-backup --since 26h | grep backup.failed   # qual alvo e o erro
+docker exec db-backup sh -c 'backup.sh > /proc/1/fd/1 2>&1'   # roda de novo
+# Verifique espaço em disco (df -h /) e se o container do banco está de pé
 ```

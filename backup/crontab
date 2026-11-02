@@ -1,0 +1,2 @@
+# 06:00 UTC = 03:00 em Brasília. A saída vai para o stdout do container (Alloy → Loki).
+0 6 * * * /usr/local/bin/backup.sh > /proc/1/fd/1 2>&1

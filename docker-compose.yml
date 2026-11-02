@@ -38,6 +38,10 @@ volumes:
   rabbitmq_data:
   alloy_data:
   prometheus_data:
+  # Sessão do WhatsApp da Evolution, do projeto evolution-api (o db-backup lê)
+  evolution_instances:
+    external: true
+    name: evolution-api_evolution_instances
 
 # =============================================================
 services:
@@ -326,3 +330,28 @@ services:
       interval: 30s
       timeout: 5s
       retries: 3
+
+  # -----------------------------------------------------------
+  # DB-BACKUP — Dump diário dos Postgres da VPS (03:00 BRT)
+  # Fala com os bancos pelo docker exec (sem senha aqui) e copia
+  # para fora com rclone crypt (Google Drive). Ver backup/backup.sh
+  # e o README ("Backup"). Só a rede padrão: precisa de internet
+  # para o rclone e de nenhuma rede interna.
+  # -----------------------------------------------------------
+  db-backup:
+    build: ./backup
+    image: operational-stack-db-backup
+    container_name: db-backup
+    restart: unless-stopped
+    environment:
+      TZ: UTC
+      BACKUP_POSTGRES: notification-price-db evolution-db metabase-db
+      BACKUP_REMOTE: ${BACKUP_REMOTE:-}
+      BACKUP_KEEP_DAILY: 7
+      BACKUP_KEEP_WEEKLY: 4
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /root/backups:/backups
+      - ./backup/rclone:/config/rclone
+      - evolution_instances:/sources/evolution-instances:ro
+      - /opt:/sources/opt:ro

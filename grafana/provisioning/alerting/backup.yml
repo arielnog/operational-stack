@@ -1,0 +1,103 @@
+# grafana/provisioning/alerting/backup.yml
+# Alertas do db-backup (backup/backup.sh), pelo Loki (uid P8E80F9AEF21F6940). Destino: a política
+# padrão do alerting.yml (WhatsApp). Evite "$" nos textos: o Grafana troca $VAR por variável de ambiente.
+apiVersion: 1
+
+groups:
+  - orgId: 1
+    name: backup
+    folder: Infra
+    interval: 5m
+    rules:
+      # Um alvo falhou (dump, verificação do pg_restore, arquivos ou cópia externa).
+      - uid: backup-failed
+        title: Backup falhou
+        condition: C
+        for: 0s
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: critical
+        annotations:
+          summary: O backup diário falhou em algum alvo. Veja o backup.failed do container db-backup no Loki.
+        data:
+          - refId: A
+            relativeTimeRange: { from: 7200, to: 0 }
+            datasourceUid: P8E80F9AEF21F6940
+            model:
+              refId: A
+              queryType: instant
+              expr: 'sum(count_over_time({container="db-backup"} |= `"message":"backup.failed"` [2h]))'
+          - refId: B
+            datasourceUid: __expr__
+            model: { refId: B, type: reduce, expression: A, reducer: last }
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator: { type: gt, params: [0] }
+
+      # O cron roda às 06:00 UTC. Sem backup.finished em 26 h, o container parou ou o cron não rodou.
+      - uid: backup-missing
+        title: Backup atrasado
+        condition: C
+        for: 10m
+        noDataState: Alerting
+        execErrState: Error
+        labels:
+          severity: critical
+        annotations:
+          summary: Nenhum backup terminou nas últimas 26 h. Verifique o container db-backup.
+        data:
+          - refId: A
+            relativeTimeRange: { from: 93600, to: 0 }
+            datasourceUid: P8E80F9AEF21F6940
+            model:
+              refId: A
+              queryType: instant
+              expr: 'sum(count_over_time({container="db-backup"} |= `"message":"backup.finished"` [26h]))'
+          - refId: B
+            datasourceUid: __expr__
+            model: { refId: B, type: reduce, expression: A, reducer: last }
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator: { type: lt, params: [1] }
+
+      # Backup só no disco da VPS não protege se ela morrer.
+      - uid: backup-offsite-skipped
+        title: Backup sem cópia externa
+        condition: C
+        for: 0s
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          summary: O último backup ficou só na VPS (sem BACKUP_REMOTE ou rclone.conf).
+        data:
+          - refId: A
+            relativeTimeRange: { from: 93600, to: 0 }
+            datasourceUid: P8E80F9AEF21F6940
+            model:
+              refId: A
+              queryType: instant
+              expr: 'sum(count_over_time({container="db-backup"} |= `"message":"backup.offsite_skipped"` [26h]))'
+          - refId: B
+            datasourceUid: __expr__
+            model: { refId: B, type: reduce, expression: A, reducer: last }
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator: { type: gt, params: [0] }
