@@ -1,10 +1,17 @@
-# Regras de alerta do notification-price (F4.2, RN-20), no formato de provisionamento do Grafana.
+# Regras de alerta do notification-price (F4.2, RN-20, F6.E1), no formato de provisionamento do Grafana.
+# Avisam falha de verdade: canal quieto não é falha (o "Nenhuma promo em 1 h" saiu na F6.5).
 #
 # Copie para grafana/provisioning/alerting/notification-price.yml no operational-stack. As regras usam
-# o datasource do Loki pelo uid fixo de lá (P8E80F9AEF21F6940, em grafana/provisioning/datasources/).
+# o datasource do Loki pelo uid fixo de lá (P8E80F9AEF21F6940, em grafana/provisioning/datasources/); o
+# "Container do notification-price parado" usa o Prometheus (uid prometheus, métricas do cAdvisor no Alloy).
 # O destino vem do alerting.yml do operational-stack: a política padrão manda tudo para o WhatsApp,
 # que só mostra o título e o summary. Evite "$" nos textos: o Grafana troca $VAR por variável de ambiente.
 apiVersion: 1
+
+# Regra tirada do arquivo continua no Grafana: o deleteRules apaga (F6.5).
+deleteRules:
+  - orgId: 1
+    uid: np-no-promo-1h
 
 groups:
   - orgId: 1
@@ -12,39 +19,6 @@ groups:
     folder: notification-price
     interval: 1m
     rules:
-      # RN-20: nenhuma promo chegou na última hora. Costuma ser o telegram-reader parado ou sem sessão.
-      - uid: np-no-promo-1h
-        title: Nenhuma promo em 1 h
-        condition: C
-        for: 5m
-        noDataState: OK
-        execErrState: Error
-        labels:
-          severity: warning
-          app: notification-price
-        annotations:
-          summary: Nenhuma promo dos canais há mais de 1 h.
-          description: Verifique o telegram-reader (runbook "Sem promos" no README).
-        data:
-          - refId: A
-            relativeTimeRange: { from: 600, to: 0 }
-            datasourceUid: P8E80F9AEF21F6940
-            model:
-              refId: A
-              queryType: instant
-              expr: 'max(max_over_time({container=~"notification-price-worker-.*"} |= `"message":"metrics.snapshot"` | json | unwrap context_last_promotion_age_s [5m]))'
-          - refId: B
-            datasourceUid: __expr__
-            model: { refId: B, type: reduce, expression: A, reducer: last }
-          - refId: C
-            datasourceUid: __expr__
-            model:
-              refId: C
-              type: threshold
-              expression: B
-              conditions:
-                - evaluator: { type: gt, params: [3600] }
-
       # O worker-maintenance grava metrics.snapshot a cada minuto. Sem snapshot em 5 min, ele caiu.
       - uid: np-worker-down
         title: Worker de manutenção parado
@@ -188,6 +162,80 @@ groups:
               conditions:
                 - evaluator: { type: lt, params: [1] }
 
+      # F6.6: o worker-maintenance não alcançou a API de gestão do RabbitMQ em nenhum snapshot dos últimos 3 min.
+      # Sem o RabbitMQ não entra promo nem comando, e o telegram-reader guarda as mensagens até ele voltar.
+      # Worker-maintenance parado não dispara aqui (sem snapshot): o "Worker de manutenção parado" cobre.
+      - uid: np-rabbitmq-down
+        title: RabbitMQ fora
+        condition: C
+        for: 2m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: critical
+          app: notification-price
+        annotations:
+          summary: O RabbitMQ não responde há 3 min. Promos e comandos do bot não entram.
+          description: Verifique o container rabbitmq (operational-stack) e os logs telegram.publish_retry do telegram-reader (runbook "RabbitMQ fora").
+        data:
+          - refId: A
+            relativeTimeRange: { from: 300, to: 0 }
+            datasourceUid: P8E80F9AEF21F6940
+            model:
+              refId: A
+              queryType: instant
+              expr: 'max(max_over_time({container=~"notification-price-worker-.*"} |= `"message":"metrics.snapshot"` | json | unwrap context_rabbitmq_up [3m]))'
+          - refId: B
+            datasourceUid: __expr__
+            model: { refId: B, type: reduce, expression: A, reducer: last }
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator: { type: lt, params: [1] }
+
+      # F6.7: mensagens represadas. Pelo mínimo da janela: a fila ficou acima do limite em todos os snapshots dos
+      # últimos 10 min, então um lote do Telegram (que esvazia em segundos) não dispara. Até 02/11 nenhuma fila
+      # passou de 0 por 10 min seguidos. -1 (API do RabbitMQ sem resposta) fica de fora: é o "RabbitMQ fora".
+      - uid: np-backlog
+        title: Mensagens represadas
+        condition: C
+        for: 0m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: critical
+          app: notification-price
+        annotations:
+          summary: Há mensagens paradas numa fila há 10 min (promos, comandos, match ou alertas).
+          description: Veja no dashboard qual fila cresce e o worker dela (runbook "Mensagens represadas").
+        data:
+          - refId: A
+            relativeTimeRange: { from: 900, to: 0 }
+            datasourceUid: P8E80F9AEF21F6940
+            model:
+              refId: A
+              queryType: instant
+              expr: >-
+                (min(min_over_time({container=~"notification-price-worker-.*"} |= `"message":"metrics.snapshot"` | json | unwrap context_rabbitmq_promotions_messages [10m])) > 20)
+                or (min(min_over_time({container=~"notification-price-worker-.*"} |= `"message":"metrics.snapshot"` | json | unwrap context_rabbitmq_bot_messages [10m])) > 5)
+                or (min(min_over_time({container=~"notification-price-worker-.*"} |= `"message":"metrics.snapshot"` | json | unwrap context_queues_default_waiting [10m])) > 50)
+                or (min(min_over_time({container=~"notification-price-worker-.*"} |= `"message":"metrics.snapshot"` | json | unwrap context_queues_notifications_waiting [10m])) > 30)
+          - refId: B
+            datasourceUid: __expr__
+            model: { refId: B, type: reduce, expression: A, reducer: last }
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator: { type: gt, params: [0] }
+
       # F5e.10: o link-service grava links.heartbeat a cada minuto. Sem heartbeat em 5 min, o serviço caiu e todos os
       # links dos alertas (promo.arnsolutions.tech) param de abrir.
       - uid: np-links-down
@@ -286,5 +334,112 @@ groups:
               refId: C
               type: threshold
               expression: B
+              conditions:
+                - evaluator: { type: gt, params: [0] }
+
+      # F6.8: o provider de afiliado deu erro (timeout, rede, http_5xx, resposta inválida) em 2 cliques ou mais na
+      # última meia hora: esses cliques foram para o link da loja, sem afiliado. "declined" (o provider não atende o
+      # link) não é erro, e "session_expired" tem o alerta próprio acima.
+      - uid: np-affiliate-error
+        title: Erro ao gerar o link de afiliado
+        condition: C
+        for: 0m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+          app: notification-price
+        annotations:
+          summary: O link de afiliado falhou em 2 ou mais cliques na última meia hora. Esses cliques saíram sem afiliado.
+          description: Veja o motivo (reason) nos logs affiliate.fallback do notification-price-link-service (runbook "Erro no link de afiliado").
+        data:
+          - refId: A
+            relativeTimeRange: { from: 1800, to: 0 }
+            datasourceUid: P8E80F9AEF21F6940
+            model:
+              refId: A
+              queryType: instant
+              expr: 'sum(count_over_time({container="notification-price-link-service"} |= `"message":"affiliate.fallback"` | json | context_reason!="declined" | context_reason!="session_expired" [30m]))'
+          - refId: B
+            datasourceUid: __expr__
+            model: { refId: B, type: reduce, expression: A, reducer: last }
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator: { type: gt, params: [1] }
+
+      # F6.9: 3 usuários diferentes ou mais removeram produto ou pausaram em 24 h (com 20 usuários no beta). Pode ser
+      # alerta ruim (match errado, repetido, de madrugada) ou o bot mandando demais.
+      - uid: np-users-leaving
+        title: Muitos usuários parando de acompanhar
+        condition: C
+        for: 0m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+          app: notification-price
+        annotations:
+          summary: 3 ou mais usuários removeram produto ou pausaram os alertas nas últimas 24 h.
+          description: Veja quais termos e alertas vieram antes (runbook "Usuários parando"); o limite está em ops/grafana/notification-price-alerts.yaml.
+        data:
+          - refId: A
+            relativeTimeRange: { from: 86400, to: 0 }
+            datasourceUid: P8E80F9AEF21F6940
+            model:
+              refId: A
+              queryType: instant
+              expr: 'count(sum by (context_user_id) (count_over_time({container=~"notification-price-worker-.*"} |= `"message":"command.handled"` | json | context_command=~"remove|pause" [24h])))'
+          - refId: B
+            datasourceUid: __expr__
+            model: { refId: B, type: reduce, expression: A, reducer: last }
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator: { type: gt, params: [2] }
+
+      # F6.10: container do notification-price parado, morto ou removido. Cobre também o telegram-reader, o link-service
+      # e o worker-api, que não têm /health sondado. O cAdvisor deixa de mandar o container parado, mas o Prometheus
+      # ainda devolve a última amostra por 5 min: nesse tempo o container_last_seen fica parado e a idade cresce (a
+      # coleta é a cada 30 s, então até ~60 s é normal); depois a série some, e a segunda parte pega o container que
+      # rodou na última hora e não está mais lá. Um deploy (recria em segundos) não dispara. Testado em 02/11 parando
+      # um container: dispara em ~3 min. Container tirado de propósito dispara por até 1 h: silencie no Grafana.
+      - uid: np-container-down
+        title: Container do notification-price parado
+        condition: C
+        for: 1m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: critical
+          app: notification-price
+        annotations:
+          summary: 'Container parado: {{ index .Labels "name" }}'
+          description: docker ps -a e docker logs do container; para subir, docker compose up -d no /opt/notification-price.
+        data:
+          - refId: A
+            relativeTimeRange: { from: 3600, to: 0 }
+            datasourceUid: prometheus
+            model:
+              refId: A
+              instant: true
+              expr: >-
+                (time() - max by (name) (container_last_seen{name=~"notification-price-.*"}) > 120)
+                or (max by (name) (max_over_time(container_last_seen{name=~"notification-price-.*"}[1h]))
+                unless max by (name) (container_last_seen{name=~"notification-price-.*"}))
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: A
               conditions:
                 - evaluator: { type: gt, params: [0] }
