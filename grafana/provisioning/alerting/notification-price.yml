@@ -338,7 +338,7 @@ groups:
               conditions:
                 - evaluator: { type: gt, params: [0] }
 
-      # F5e.10: o link-service grava links.heartbeat a cada minuto. Sem heartbeat em 5 min, o serviço caiu e todos os
+      # F5e.10: o price-redirect grava links.heartbeat a cada minuto. Sem heartbeat em 5 min, o serviço caiu e todos os
       # links dos alertas (promo.arnsolutions.tech) param de abrir.
       - uid: np-links-down
         title: Serviço de links parado
@@ -351,8 +351,8 @@ groups:
           app: notification-price
           container: notification-price-link-service
         annotations:
-          summary: O link-service não dá sinal há 5 min. Os links dos alertas não abrem.
-          description: Verifique o container notification-price-link-service (docker compose up -d link-service). Para os alertas novos levarem o link da loja, OFFER_PAGE_ENABLED=false no .env e docker compose up -d.
+          summary: O price-redirect (página de oferta) não dá sinal há 5 min. Os links dos alertas não abrem.
+          description: Verifique o container notification-price-link-service (cd /opt/price-redirect && docker compose up -d). Para os alertas novos levarem o link da loja, OFFER_PAGE_ENABLED=false no .env do notification-price e docker compose up -d lá.
         data:
           - refId: A
             relativeTimeRange: { from: 300, to: 0 }
@@ -373,7 +373,7 @@ groups:
               conditions:
                 - evaluator: { type: lt, params: [1] }
 
-      # F5e.10: o link-service está de pé, mas o worker-api não responde: os cliques caem em "Tente de novo".
+      # F5e.10: o price-redirect está de pé, mas o worker-api não responde: os cliques caem em "Tente de novo".
       - uid: np-links-api-down
         title: Página de oferta sem o worker-api
         condition: C
@@ -385,7 +385,7 @@ groups:
           app: notification-price
           container: notification-price-worker-api
         annotations:
-          summary: O link-service não alcança o worker-api. Os links dos alertas mostram "Tente de novo".
+          summary: O price-redirect não alcança o worker-api. Os links dos alertas mostram "Tente de novo".
           description: Verifique o container notification-price-worker-api (docker compose up -d worker-api).
         data:
           - refId: A
@@ -421,7 +421,7 @@ groups:
           container: notification-price-link-service
         annotations:
           summary: A sessão do Mercado Livre expirou. Os cliques do ML saem sem o link de afiliado.
-          description: Troque AFFILIATE_MERCADOLIVRE_COOKIE no .env (README, "Sessão do Mercado Livre expirou") e rode docker compose up -d link-service.
+          description: Troque AFFILIATE_MERCADOLIVRE_COOKIE no .env do price-redirect (README de lá, "Sessão do Mercado Livre expirou") e rode docker compose up -d em /opt/price-redirect.
         data:
           - refId: A
             relativeTimeRange: { from: 1800, to: 0 }
@@ -457,7 +457,7 @@ groups:
           container: notification-price-link-service
         annotations:
           summary: O link de afiliado falhou em 2 ou mais cliques na última meia hora. Esses cliques saíram sem afiliado.
-          description: Veja o motivo (reason) nos logs affiliate.fallback do notification-price-link-service (runbook "Erro no link de afiliado").
+          description: Veja o motivo (reason) nos logs affiliate.fallback do notification-price-link-service (runbook "Erro no link de afiliado", no README do price-redirect).
         data:
           - refId: A
             relativeTimeRange: { from: 1800, to: 0 }
@@ -513,7 +513,7 @@ groups:
               conditions:
                 - evaluator: { type: gt, params: [2] }
 
-      # F6.10: container do notification-price parado, morto ou removido. Cobre também o telegram-reader, o link-service
+      # F6.10: container do notification-price parado, morto ou removido. Cobre também o telegram-reader, o price-redirect
       # e o worker-api, que não têm /health sondado. O cAdvisor deixa de mandar o container parado, mas o Prometheus
       # ainda devolve a última amostra por 5 min: nesse tempo o container_last_seen fica parado e a idade cresce (a
       # coleta é a cada 30 s, então até ~60 s é normal); depois a série some, e a segunda parte pega o container que

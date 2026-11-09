@@ -116,7 +116,7 @@ services:
   # METABASE — BI (leitura dos bancos das apps via infra_data)
   # -----------------------------------------------------------
   metabase:
-    image: metabase/metabase:latest
+    image: metabase/metabase:v0.65.3.6
     container_name: metabase
     restart: unless-stopped
     networks:
@@ -144,6 +144,16 @@ services:
       - "traefik.http.routers.metabase-int.entrypoints=websecure"
       - "traefik.http.routers.metabase-int.tls.certresolver=cloudflare"
       - "traefik.http.routers.metabase-int.middlewares=tailnet-only@file"
+      # Painel público "Produtos - Maiores dados" em promo.${DOMAIN}/historico: a página é do price-redirect
+      # (arielnog/price-redirect), com o painel num iframe no mesmo domínio. Daqui passa só esse painel, os arquivos da tela
+      # e as propriedades públicas (as mesmas que já vão embutidas na página); login, administração e os outros
+      # painéis continuam só na tailnet. secureApp: X-Frame-Options SAMEORIGIN, o painel abre só dentro do promo.
+      - "traefik.http.routers.metabase-historico.rule=Host(`promo.${DOMAIN}`) && (PathPrefix(`/public/dashboard/bd2df3be-4837-49fa-86bc-b9bda34c8367`) || PathPrefix(`/api/public/dashboard/bd2df3be-4837-49fa-86bc-b9bda34c8367`) || PathPrefix(`/app/`) || (Path(`/api/session/properties`) && Method(`GET`)))"
+      - "traefik.http.routers.metabase-historico.priority=1000"
+      - "traefik.http.routers.metabase-historico.entrypoints=websecure"
+      - "traefik.http.routers.metabase-historico.tls.certresolver=cloudflare"
+      - "traefik.http.routers.metabase-historico.middlewares=secureApp@file"
+      - "traefik.http.routers.metabase-historico.service=metabase"
       - "traefik.http.services.metabase.loadbalancer.server.port=3000"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
