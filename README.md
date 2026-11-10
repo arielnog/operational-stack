@@ -484,7 +484,7 @@ Teste de restauração: rode o passo 2 num Postgres de teste e compare as contag
   [ 🔎 Ver alerta ]  [ 🔕 Silenciar ]   (Silenciar só enquanto dispara; abrem o grafana.int, precisa do Tailscale)
   ```
 
-  Vários alertas juntos saem numa mensagem só, com "📦 N alertas" no topo e no máximo 5 detalhados (limite de 4096 caracteres do Telegram). Incidente crítico também manda antes um GIF (`TELEGRAM_GIF_INCIDENT` no `.env`: URL de um .gif ou file_id do Telegram), só no disparo e no máximo a cada 24h; se o GIF falhar, o texto chega igual.
+  Vários alertas juntos saem numa mensagem só, com "📦 N alertas" no topo e no máximo 5 detalhados (limite de 4096 caracteres do Telegram).
 
   Toda regra nova leva a `severity` (`critical` ou `warning`), as labels `app` (a aplicação; `infra` para VPS, Traefik e disco) e `container` (de onde vem o problema; pode vir da query, como `'{{ index .Labels "name" }}'`), e as anotações `summary` (a mensagem) e, de preferência, `description` (o que verificar). Sem as labels, a mensagem sai com "não informada".
 - **App nova** — para aparecer no health, adicione um `target` em `alloy/metrics.alloy` com a URL interna do health e rode `docker restart alloy`

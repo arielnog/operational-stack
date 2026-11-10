@@ -18,7 +18,6 @@ apiVersion: 1
 #   telegram.text     mensagem completa (até 5 alertas do grupo; acima disso, só os 5 primeiros,
 #                     para não passar dos 4096 caracteres do Telegram e o envio ser recusado)
 #   telegram.payload  sendMessage com botões: Ver alerta (regra no Grafana) e, se disparando, Silenciar
-#   telegram.gif      sendAnimation só para incidente crítico (rota abaixo), legenda curta
 templates:
   - orgId: 1
     name: telegram
@@ -80,15 +79,7 @@ templates:
       {{- end }}
       {{- end }}
 
-      {{ define "telegram.caption" -}}
-      🚨 <b>INCIDENTE</b>{{ with index .Alerts 0 }} · <b>{{ or .Labels.app "não informada" | html }}</b> · {{ or .Labels.container "não informado" | html }}{{ end }}{{ if gt (len .Alerts) 1 }} (+ outros){{ end }}
-      {{- end }}
-
-      {{ define "telegram.gif" -}}
-      {{ coll.Dict "chat_id" (reReplaceAll "^id:" "" .Vars.chat) "animation" .Vars.gif "caption" (tmpl.Exec "telegram.caption" .) "parse_mode" "HTML" | data.ToJSON }}
-      {{- end }}
-
-# Template e contact point do WhatsApp (Evolution), substituídos pelo Telegram.
+# Template e contact point do WhatsApp (Evolution), substituídos pelo Telegram, e o do GIF (removido).
 deleteTemplates:
   - orgId: 1
     name: whatsapp
@@ -96,6 +87,8 @@ deleteTemplates:
 deleteContactPoints:
   - orgId: 1
     uid: whatsapp-evolution
+  - orgId: 1
+    uid: telegram-gif
 
 # ── Para onde vai ────────────────────────────────────────────────────
 # API oficial do Telegram, sem depender de nada da VPS além da saída para a internet.
@@ -117,27 +110,6 @@ contactPoints:
             vars:
               chat: "id:${TELEGRAM_ALERT_CHAT_ID}"
 
-  # GIF de chamar atenção, só no disparo de incidente crítico (sem mensagem de resolvido).
-  # É uma mensagem a mais, antes do texto completo: se o GIF falhar (URL vazia ou fora do ar),
-  # o texto com os botões chega igual pela rota telegram.
-  - orgId: 1
-    name: telegram-gif
-    receivers:
-      - uid: telegram-gif
-        type: webhook
-        disableResolveMessage: true
-        settings:
-          url: https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendAnimation
-          httpMethod: POST
-          payload:
-            template: '{{ template "telegram.gif" . }}'
-            vars:
-              chat: "id:${TELEGRAM_ALERT_CHAT_ID}"
-              gif: "${TELEGRAM_GIF_INCIDENT}"
-
-# critical → GIF (continue) e depois o texto; o resto → só o texto.
-# A segunda rota casa com tudo (todo alerta tem alertname); sem ela, o alerta que casou com a do GIF
-# não cairia no receiver padrão.
 policies:
   - orgId: 1
     receiver: telegram
@@ -145,15 +117,6 @@ policies:
     group_wait: 30s
     group_interval: 5m
     repeat_interval: 4h
-    routes:
-      - receiver: telegram-gif
-        object_matchers:
-          - ["severity", "=", "critical"]
-        continue: true
-        repeat_interval: 24h
-      - receiver: telegram
-        object_matchers:
-          - ["alertname", "=~", ".+"]
 
 # ── Regras ───────────────────────────────────────────────────────────
 # Cada regra: A = query instantânea no Prometheus, C = limite sobre A.
