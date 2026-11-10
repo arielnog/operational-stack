@@ -33,7 +33,7 @@ vps-stack/
 │   ├── dashboards/                 # JSONs da pasta "Infra" (Visão Geral e outros)
 │   └── provisioning/
 │       ├── alerting/
-│       │   ├── alerting.yml        # Alertas da infra, contact point e política (WhatsApp)
+│       │   ├── alerting.yml        # Alertas da infra, contact point e política (Telegram)
 │       │   └── notification-price.yml  # Alertas do notification-price (cópia do repositório dele)
 │       ├── dashboards/
 │       │   └── dashboards.yml      # Carrega grafana/dashboards
@@ -467,17 +467,17 @@ Teste de restauração: rode o passo 2 num Postgres de teste e compare as contag
 - **Logs de containers** — Alloy coleta automaticamente via Docker socket
 - **Métricas** — o Alloy faz o papel de node-exporter, cAdvisor, blackbox, postgres e redis exporter e manda para o Prometheus (15 dias). O Traefik expõe métricas na `:8082` só dentro da rede
 - **Dashboards** — Grafana → pasta **Infra** → **Visão Geral** (health, tráfego, recursos, logs). Edite os JSONs em `grafana/dashboards/`, não a UI
-- **Alertas** — 6 regras em `grafana/provisioning/alerting/alerting.yml` chegam no WhatsApp via Evolution (instância, token e número no `.env`). Se a própria Evolution cair, o alerta não chega
-- **Alertas das apps** — um arquivo por app em `grafana/provisioning/alerting/` (ex.: `notification-price.yml`, cópia de `ops/grafana/notification-price-alerts.yaml` daquele repositório), usando o uid do Loki daqui e a mesma política do WhatsApp. Depois de mudar um arquivo: `docker restart grafana`
-- **Mensagem do alerta** — o template `whatsapp` (em `alerting.yml`) monta, para cada alerta, a origem e o resumo:
+- **Alertas** — 6 regras em `grafana/provisioning/alerting/alerting.yml` chegam no Telegram por um bot e um grupo só de alertas (`TELEGRAM_BOT_TOKEN` e `TELEGRAM_ALERT_CHAT_ID` no `.env`). Não dependem da Evolution nem de outro serviço da VPS; se a VPS inteira cair, nada é enviado
+- **Alertas das apps** — um arquivo por app em `grafana/provisioning/alerting/` (ex.: `notification-price.yml`, cópia de `ops/grafana/notification-price-alerts.yaml` daquele repositório), usando o uid do Loki daqui e a mesma política do Telegram. Depois de mudar um arquivo: `docker restart grafana`
+- **Mensagem do alerta** — o template `telegram` (em `alerting.yml`, HTML) monta, para cada alerta, a origem e o resumo:
 
   ```text
-  🚨 *ALERTA - INCIDENTE* 🚨        (severity critical; ao resolver, ✅ *INCIDENTE RESOLVIDO* ✅)
-  ⚠️ *ALERTA - AVISO* ⚠️            (severity warning; ao resolver, ✅ *AVISO RESOLVIDO* ✅)
+  🚨 ALERTA - INCIDENTE 🚨        (severity critical; ao resolver, ✅ INCIDENTE RESOLVIDO ✅)
+  ⚠️ ALERTA - AVISO ⚠️            (severity warning; ao resolver, ✅ AVISO RESOLVIDO ✅)
 
-  - *Aplicação:* notification-price
-  - *Container:* notification-price-worker-sender
-  - *Mensagem:* Há alerta pendente há mais de 5 min.
+  - Aplicação: notification-price
+  - Container: notification-price-worker-sender
+  - Mensagem: Há alerta pendente há mais de 5 min.
   ```
 
   Toda regra nova leva a `severity` (`critical` ou `warning`), as labels `app` (a aplicação; `infra` para VPS, Traefik e disco) e `container` (de onde vem o problema; pode vir da query, como `'{{ index .Labels "name" }}'`), e a anotação `summary` (a mensagem). Sem as labels, a mensagem sai com "não informada".

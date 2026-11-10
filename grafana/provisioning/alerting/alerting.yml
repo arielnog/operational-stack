@@ -1,5 +1,5 @@
 # grafana/provisioning/alerting/alerting.yml
-# Alertas da pasta Infra → WhatsApp via Evolution API (instância e token no .env).
+# Alertas da pasta Infra → Telegram (bot e grupo dedicados; token e chat_id no .env).
 # Evite "$" nos textos: o Grafana troca $VAR por variável de ambiente neste arquivo.
 # Por isso as anotações usam {{ .Labels.x }} em vez de {{ $labels.x }}.
 #
@@ -11,52 +11,54 @@
 apiVersion: 1
 
 # ── Mensagem ─────────────────────────────────────────────────────────
+# Telegram com parse_mode HTML: o summary passa por "html" para "<" e "&" não quebrarem o envio.
 templates:
   - orgId: 1
-    name: whatsapp
+    name: telegram
     template: |
-      {{ define "whatsapp.text" -}}
+      {{ define "telegram.text" -}}
       {{ range .Alerts -}}
       {{ if eq .Labels.severity "warning" -}}
-      {{ if eq .Status "firing" }}⚠️ *ALERTA - AVISO* ⚠️{{ else }}✅ *AVISO RESOLVIDO* ✅{{ end }}
+      {{ if eq .Status "firing" }}⚠️ <b>ALERTA - AVISO</b> ⚠️{{ else }}✅ <b>AVISO RESOLVIDO</b> ✅{{ end }}
       {{- else -}}
-      {{ if eq .Status "firing" }}🚨 *ALERTA - INCIDENTE* 🚨{{ else }}✅ *INCIDENTE RESOLVIDO* ✅{{ end }}
+      {{ if eq .Status "firing" }}🚨 <b>ALERTA - INCIDENTE</b> 🚨{{ else }}✅ <b>INCIDENTE RESOLVIDO</b> ✅{{ end }}
       {{- end }}
 
-      - *Aplicação:* {{ or .Labels.app "não informada" }}
-      - *Container:* {{ or .Labels.container "não informado" }}
-      - *Mensagem:* {{ .Annotations.summary }}
+      - <b>Aplicação:</b> {{ or .Labels.app "não informada" | html }}
+      - <b>Container:</b> {{ or .Labels.container "não informado" | html }}
+      - <b>Mensagem:</b> {{ .Annotations.summary | html }}
 
       {{ end -}}
       {{- end }}
 
-      {{ define "whatsapp.payload" -}}
-      {{ coll.Dict "number" (reReplaceAll "^tel:" "" .Vars.number) "text" (tmpl.Exec "whatsapp.text" .) | data.ToJSON }}
-      {{- end }}
-
-# ── Para onde vai ────────────────────────────────────────────────────
-# Depende da própria Evolution: se ela cair, o alerta não chega.
-contactPoints:
+# Template e contact point do WhatsApp (Evolution), substituídos pelo Telegram.
+deleteTemplates:
   - orgId: 1
     name: whatsapp
+
+deleteContactPoints:
+  - orgId: 1
+    uid: whatsapp-evolution
+
+# ── Para onde vai ────────────────────────────────────────────────────
+# API oficial do Telegram, sem depender de nada da VPS além da saída para a internet.
+# Bot e grupo dedicados aos alertas (token e chat_id no .env).
+contactPoints:
+  - orgId: 1
+    name: telegram
     receivers:
-      - uid: whatsapp-evolution
-        type: webhook
+      - uid: telegram-alerts
+        type: telegram
         settings:
-          url: http://evolution_api:8000/message/sendText/${EVOLUTION_ALERT_INSTANCE}
-          httpMethod: POST
-          headers:
-            apikey: ${EVOLUTION_ALERT_APIKEY}
-          payload:
-            template: '{{ template "whatsapp.payload" . }}'
-            vars:
-              # "tel:" mantém o valor como texto (só número vira int e quebra o
-              # provisioning); o template remove o prefixo.
-              number: "tel:${ALERT_WHATSAPP_NUMBER}"
+          bottoken: ${TELEGRAM_BOT_TOKEN}
+          chatid: "${TELEGRAM_ALERT_CHAT_ID}"
+          parse_mode: HTML
+          disable_web_page_preview: true
+          message: '{{ template "telegram.text" . }}'
 
 policies:
   - orgId: 1
-    receiver: whatsapp
+    receiver: telegram
     group_by: ["alertname"]
     group_wait: 30s
     group_interval: 5m

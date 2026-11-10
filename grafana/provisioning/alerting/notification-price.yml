@@ -4,7 +4,7 @@
 # Copie para grafana/provisioning/alerting/notification-price.yml no operational-stack. As regras usam
 # o datasource do Loki pelo uid fixo de lá (P8E80F9AEF21F6940, em grafana/provisioning/datasources/); o
 # "Container do notification-price parado" usa o Prometheus (uid prometheus, métricas do cAdvisor no Alloy).
-# O destino vem do alerting.yml do operational-stack: a política padrão manda tudo para o WhatsApp,
+# O destino vem do alerting.yml do operational-stack: a política padrão manda tudo para o Telegram,
 # que mostra a aplicação (label app), o container (label container) e o summary.
 # Evite "$" nos textos: o Grafana troca $VAR por variável de ambiente.
 apiVersion: 1

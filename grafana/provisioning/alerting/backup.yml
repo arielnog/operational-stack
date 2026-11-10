@@ -1,6 +1,6 @@
 # grafana/provisioning/alerting/backup.yml
 # Alertas do db-backup (backup/backup.sh), pelo Loki (uid P8E80F9AEF21F6940). Destino: a política
-# padrão do alerting.yml (WhatsApp). Evite "$" nos textos: o Grafana troca $VAR por variável de ambiente.
+# padrão do alerting.yml (Telegram). Evite "$" nos textos: o Grafana troca $VAR por variável de ambiente.
 apiVersion: 1
 
 groups:
