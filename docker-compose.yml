@@ -182,6 +182,7 @@ services:
       GF_LOG_MODE: console
       # Alertas via Telegram (grafana/provisioning/alerting/alerting.yml)
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
+      TELEGRAM_GIF_INCIDENT: ${TELEGRAM_GIF_INCIDENT:-}
       TELEGRAM_ALERT_CHAT_ID: ${TELEGRAM_ALERT_CHAT_ID}
     volumes:
       - grafana_data:/var/lib/grafana

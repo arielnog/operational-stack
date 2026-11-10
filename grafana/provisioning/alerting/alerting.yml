@@ -11,13 +11,23 @@
 apiVersion: 1
 
 # ── Mensagem ─────────────────────────────────────────────────────────
-# Telegram com parse_mode HTML: o summary passa por "html" para "<" e "&" não quebrarem o envio.
+# Telegram com parse_mode HTML: textos das regras passam por "html" para "<" e "&" não quebrarem o envio.
+# Sem variáveis de template ("$x"): o Grafana trocaria por variável de ambiente. Por isso os pedaços
+# são templates chamados com o dado certo como ponto (ex.: telegram.dur recebe a duração).
+#
+#   telegram.text     mensagem completa (até 5 alertas do grupo; acima disso, só os 5 primeiros,
+#                     para não passar dos 4096 caracteres do Telegram e o envio ser recusado)
+#   telegram.payload  sendMessage com botões: Ver alerta (regra no Grafana) e, se disparando, Silenciar
+#   telegram.gif      sendAnimation só para incidente crítico (rota abaixo), legenda curta
 templates:
   - orgId: 1
     name: telegram
     template: |
-      {{ define "telegram.text" -}}
-      {{ range .Alerts -}}
+      {{ define "telegram.dur" -}}
+      {{ if lt .Minutes 1.0 }}menos de 1 min{{ else if lt .Minutes 60.0 }}{{ printf "%.0f min" .Minutes }}{{ else }}{{ printf "%.1f h" .Hours }}{{ end }}
+      {{- end }}
+
+      {{ define "telegram.alert" -}}
       {{ if eq .Labels.severity "warning" -}}
       {{ if eq .Status "firing" }}⚠️ <b>ALERTA - AVISO</b> ⚠️{{ else }}✅ <b>AVISO RESOLVIDO</b> ✅{{ end }}
       {{- else -}}
@@ -26,13 +36,56 @@ templates:
 
       - <b>Aplicação:</b> {{ or .Labels.app "não informada" | html }}
       - <b>Container:</b> {{ or .Labels.container "não informado" | html }}
-      - <b>Mensagem:</b> {{ .Annotations.summary | html }}
+      - <b>Mensagem:</b> {{ or .Annotations.summary "sem resumo" | html }}
+      {{ if eq .Status "firing" -}}
+      - <b>Desde:</b> {{ .StartsAt | tz "America/Sao_Paulo" | date "02/01 15:04" }} (há {{ template "telegram.dur" ((time.Now).Sub .StartsAt) }})
+      {{- else -}}
+      - <b>Duração:</b> {{ template "telegram.dur" (.EndsAt.Sub .StartsAt) }} (até {{ .EndsAt | tz "America/Sao_Paulo" | date "02/01 15:04" }})
+      {{- end }}
+      {{- with .Annotations.description }}
+      <blockquote expandable><b>O que verificar</b>
+      {{ . | html }}</blockquote>
+      {{- end }}
+      {{- end }}
+
+      {{ define "telegram.list" -}}
+      {{ range . }}{{ template "telegram.alert" . }}
 
       {{ end -}}
       {{- end }}
 
+      {{ define "telegram.text" -}}
+      {{ if gt (len .Alerts) 1 -}}
+      📦 <b>{{ len .Alerts }} alertas</b> · {{ .GroupLabels.alertname | html }}
+
+      {{ end -}}
+      {{ if gt (len .Alerts) 5 -}}
+      {{ template "telegram.list" (slice .Alerts 0 5) }}<i>… mostrando 5; o resto está no Grafana.</i>
+      {{- else -}}
+      {{ template "telegram.list" .Alerts }}
+      {{- end }}
+      {{- end }}
+
+      {{ define "telegram.silenceurl" -}}
+      {{ if eq (len .Alerts) 1 }}{{ (index .Alerts 0).SilenceURL }}{{ else }}{{ printf "%s/alerting/silence/new?alertmanager=grafana&matcher=%s" .ExternalURL (urlquery (printf "alertname=%s" .GroupLabels.alertname)) }}{{ end }}
+      {{- end }}
+
       {{ define "telegram.payload" -}}
+      {{ if not (match "^https://" (index .Alerts 0).GeneratorURL) -}}
       {{ coll.Dict "chat_id" (reReplaceAll "^id:" "" .Vars.chat) "text" (tmpl.Exec "telegram.text" .) "parse_mode" "HTML" "disable_web_page_preview" true | data.ToJSON }}
+      {{- else if eq .Status "firing" -}}
+      {{ coll.Dict "chat_id" (reReplaceAll "^id:" "" .Vars.chat) "text" (tmpl.Exec "telegram.text" .) "parse_mode" "HTML" "disable_web_page_preview" true "reply_markup" (coll.Dict "inline_keyboard" (coll.Slice (coll.Slice (coll.Dict "text" "🔎 Ver alerta" "url" (index .Alerts 0).GeneratorURL) (coll.Dict "text" "🔕 Silenciar" "url" (tmpl.Exec "telegram.silenceurl" .))))) | data.ToJSON }}
+      {{- else -}}
+      {{ coll.Dict "chat_id" (reReplaceAll "^id:" "" .Vars.chat) "text" (tmpl.Exec "telegram.text" .) "parse_mode" "HTML" "disable_web_page_preview" true "reply_markup" (coll.Dict "inline_keyboard" (coll.Slice (coll.Slice (coll.Dict "text" "🔎 Ver alerta" "url" (index .Alerts 0).GeneratorURL)))) | data.ToJSON }}
+      {{- end }}
+      {{- end }}
+
+      {{ define "telegram.caption" -}}
+      🚨 <b>INCIDENTE</b>{{ with index .Alerts 0 }} · <b>{{ or .Labels.app "não informada" | html }}</b> · {{ or .Labels.container "não informado" | html }}{{ end }}{{ if gt (len .Alerts) 1 }} (+ outros){{ end }}
+      {{- end }}
+
+      {{ define "telegram.gif" -}}
+      {{ coll.Dict "chat_id" (reReplaceAll "^id:" "" .Vars.chat) "animation" .Vars.gif "caption" (tmpl.Exec "telegram.caption" .) "parse_mode" "HTML" | data.ToJSON }}
       {{- end }}
 
 # Template e contact point do WhatsApp (Evolution), substituídos pelo Telegram.
@@ -64,6 +117,27 @@ contactPoints:
             vars:
               chat: "id:${TELEGRAM_ALERT_CHAT_ID}"
 
+  # GIF de chamar atenção, só no disparo de incidente crítico (sem mensagem de resolvido).
+  # É uma mensagem a mais, antes do texto completo: se o GIF falhar (URL vazia ou fora do ar),
+  # o texto com os botões chega igual pela rota telegram.
+  - orgId: 1
+    name: telegram-gif
+    receivers:
+      - uid: telegram-gif
+        type: webhook
+        disableResolveMessage: true
+        settings:
+          url: https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendAnimation
+          httpMethod: POST
+          payload:
+            template: '{{ template "telegram.gif" . }}'
+            vars:
+              chat: "id:${TELEGRAM_ALERT_CHAT_ID}"
+              gif: "${TELEGRAM_GIF_INCIDENT}"
+
+# critical → GIF (continue) e depois o texto; o resto → só o texto.
+# A segunda rota casa com tudo (todo alerta tem alertname); sem ela, o alerta que casou com a do GIF
+# não cairia no receiver padrão.
 policies:
   - orgId: 1
     receiver: telegram
@@ -71,6 +145,15 @@ policies:
     group_wait: 30s
     group_interval: 5m
     repeat_interval: 4h
+    routes:
+      - receiver: telegram-gif
+        object_matchers:
+          - ["severity", "=", "critical"]
+        continue: true
+        repeat_interval: 24h
+      - receiver: telegram
+        object_matchers:
+          - ["alertname", "=~", ".+"]
 
 # ── Regras ───────────────────────────────────────────────────────────
 # Cada regra: A = query instantânea no Prometheus, C = limite sobre A.

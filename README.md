@@ -478,9 +478,15 @@ Teste de restauração: rode o passo 2 num Postgres de teste e compare as contag
   - Aplicação: notification-price
   - Container: notification-price-worker-sender
   - Mensagem: Há alerta pendente há mais de 5 min.
+  - Desde: 10/11 14:26 (há 6 min)    (ao resolver: Duração: 1.6 h (até 10/11 16:02))
+  ▸ O que verificar                   (a anotação description, num bloco que expande ao tocar)
+
+  [ 🔎 Ver alerta ]  [ 🔕 Silenciar ]   (Silenciar só enquanto dispara; abrem o grafana.int, precisa do Tailscale)
   ```
 
-  Toda regra nova leva a `severity` (`critical` ou `warning`), as labels `app` (a aplicação; `infra` para VPS, Traefik e disco) e `container` (de onde vem o problema; pode vir da query, como `'{{ index .Labels "name" }}'`), e a anotação `summary` (a mensagem). Sem as labels, a mensagem sai com "não informada".
+  Vários alertas juntos saem numa mensagem só, com "📦 N alertas" no topo e no máximo 5 detalhados (limite de 4096 caracteres do Telegram). Incidente crítico também manda antes um GIF (`TELEGRAM_GIF_INCIDENT` no `.env`: URL de um .gif ou file_id do Telegram), só no disparo e no máximo a cada 24h; se o GIF falhar, o texto chega igual.
+
+  Toda regra nova leva a `severity` (`critical` ou `warning`), as labels `app` (a aplicação; `infra` para VPS, Traefik e disco) e `container` (de onde vem o problema; pode vir da query, como `'{{ index .Labels "name" }}'`), e as anotações `summary` (a mensagem) e, de preferência, `description` (o que verificar). Sem as labels, a mensagem sai com "não informada".
 - **App nova** — para aparecer no health, adicione um `target` em `alloy/metrics.alloy` com a URL interna do health e rode `docker restart alloy`
 - **Logs do host** — `/var/log/syslog` e `/var/log/auth.log` também coletados
 - **Visualização** — Grafana → Explore → selecione datasource Loki
