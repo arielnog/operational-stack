@@ -31,6 +31,10 @@ templates:
       {{ end -}}
       {{- end }}
 
+      {{ define "telegram.payload" -}}
+      {{ coll.Dict "chat_id" (reReplaceAll "^id:" "" .Vars.chat) "text" (tmpl.Exec "telegram.text" .) "parse_mode" "HTML" "disable_web_page_preview" true | data.ToJSON }}
+      {{- end }}
+
 # Template e contact point do WhatsApp (Evolution), substituídos pelo Telegram.
 deleteTemplates:
   - orgId: 1
@@ -43,18 +47,22 @@ deleteContactPoints:
 # ── Para onde vai ────────────────────────────────────────────────────
 # API oficial do Telegram, sem depender de nada da VPS além da saída para a internet.
 # Bot e grupo dedicados aos alertas (token e chat_id no .env).
+# Webhook direto no sendMessage em vez da integração "telegram": nela o chatid vindo do .env
+# vira número (o Grafana converte o valor interpolado) e o provisioning falha, derrubando o Grafana.
+# Aqui o "id:" mantém o valor como texto e o template remove o prefixo (mesma ideia do antigo "tel:").
 contactPoints:
   - orgId: 1
     name: telegram
     receivers:
-      - uid: telegram-alerts
-        type: telegram
+      - uid: telegram-bot
+        type: webhook
         settings:
-          bottoken: ${TELEGRAM_BOT_TOKEN}
-          chatid: "${TELEGRAM_ALERT_CHAT_ID}"
-          parse_mode: HTML
-          disable_web_page_preview: true
-          message: '{{ template "telegram.text" . }}'
+          url: https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage
+          httpMethod: POST
+          payload:
+            template: '{{ template "telegram.payload" . }}'
+            vars:
+              chat: "id:${TELEGRAM_ALERT_CHAT_ID}"
 
 policies:
   - orgId: 1
