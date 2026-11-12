@@ -69,7 +69,7 @@ Internet
             │ rede interna Docker
    ┌─────────┼──────────┬──────────────┐
    ▼         ▼          ▼              ▼
-Metabase  Grafana   Suas Apps    (futuras apps)
+Grafana   Suas Apps    (futuras apps)
             │
             ▼
 ┌──────────────────────────────────────────────────────────────┐
@@ -207,11 +207,6 @@ RABBITMQ_ADMIN_PASSWORD=TROQUE_POR_SENHA_FORTE
 # Let's Encrypt (e-mail para alertas de expiração)
 LETSENCRYPT_EMAIL=seu@email.com
 
-# Metabase (banco próprio: metabase-db)
-METABASE_DB=metabase
-METABASE_DB_USER=metabase_user
-METABASE_DB_PASSWORD=TROQUE_POR_SENHA_FORTE
-
 # Grafana
 GRAFANA_USER=admin
 GRAFANA_PASSWORD=TROQUE_POR_SENHA_FORTE
@@ -303,10 +298,8 @@ A saída deve mostrar todos os serviços como `healthy` ou `running`:
 ```
 NAME         IMAGE                    STATUS
 traefik      traefik:v3.1             running (healthy)
-metabase-db  postgres:16-alpine       running (healthy)
 redis        redis:7-alpine           running (healthy)
 rabbitmq     rabbitmq:3.13-management running (healthy)
-metabase     metabase/metabase        running (healthy)
 grafana      grafana/grafana          running (healthy)
 loki         grafana/loki             running (healthy)
 alloy        grafana/alloy            running
@@ -322,7 +315,6 @@ Após tudo subir (aguarde ~2 minutos para o SSL ser emitido):
 | Serviço | URL | Usuário padrão |
 |---------|-----|----------------|
 | Traefik dashboard | `https://traefik.int.seudominio.com` (só via tailnet) | basic auth do `.env` |
-| Metabase | `https://metabase.int.seudominio.com` (só via tailnet) | criado no primeiro acesso |
 | Grafana | `https://grafana.int.seudominio.com` (só via tailnet) | admin / senha do `.env` |
 
 Os `*.int` apontam no DNS (nuvem cinza) para o IP `100.x` da VPS e passam pelo middleware `tailnet-only`. Passo a passo do Tailscale em `docs/tailscale.md`.
@@ -340,7 +332,7 @@ vim /opt/minha-api/docker-compose.yml
 
 Pontos importantes no compose da app (detalhes em `docs/ARCHITECTURE.md`):
 - App nas redes `traefik_public` (só se tiver rota pública) e `infra_internal` (Redis, Loki), ambas `external: true`
-- Postgres próprio da app, nas redes `<app>_net` e `infra_data`, com usuário `<app>_reader` para o Metabase (`examples/postgres-init-reader.sh`)
+- Postgres próprio da app, nas redes `<app>_net` e `infra_data`, com usuário `monitor` para as métricas do Alloy e, se quiser consultas só de leitura, `<app>_reader` (`examples/postgres-init-reader.sh`)
 - Reserve um DB number do Redis em `redis/databases.md`
 - Se a app usa mensageria, crie o vhost e o usuário dela no RabbitMQ e registre em `rabbitmq/README.md`
 - Adicione as labels do Traefik para o subdomínio
@@ -373,7 +365,7 @@ docker compose -f /opt/minha-api/docker-compose.yml up -d
 - **`traefik_public`** — Traefik + containers que precisam ser acessados externamente
 - **`infra_internal`** — Redis, Loki, Alloy, Grafana e apps — inacessível de fora
 - **`observability`** — Loki, Alloy, Prometheus e Grafana
-- **`infra_data`** — Metabase + bancos das apps (leitura com usuário `*_reader`)
+- **`infra_data`** — Alloy + bancos das apps (métricas com o usuário `monitor`)
 - **`<app>_net`** — rede privada de cada app com o banco dela
 
 ---
@@ -388,7 +380,7 @@ docker compose ps
 docker compose logs -f
 
 # Logs de um serviço específico
-docker compose logs -f metabase-db
+docker compose logs -f grafana
 docker compose logs -f traefik
 
 # Reiniciar um serviço
@@ -419,7 +411,7 @@ O container `db-backup` (`backup/`) roda todo dia às 06:00 UTC (03:00 BRT):
 
 | O quê | Como |
 |---|---|
-| Postgres de `BACKUP_POSTGRES` (`notification-price-db`, `evolution-db`, `metabase-db`) | `pg_dump -Fc` pelo `docker exec`, conferido com `pg_restore --list` |
+| Postgres de `BACKUP_POSTGRES` (`notification-price-db`, `evolution-db`) | `pg_dump -Fc` pelo `docker exec`, conferido com `pg_restore --list` |
 | Sessão do WhatsApp da Evolution (volume `evolution-api_evolution_instances`) | `evolution-instances.tar.gz` |
 | `.env` de cada app em `/opt/*` | `env-files.tar.gz` |
 
@@ -518,7 +510,7 @@ docker exec -it <app>-db pg_isready -U <usuario>
 # Verifique:
 # - POSTGRES_USER e POSTGRES_PASSWORD no .env da app
 # - App e banco na mesma rede <app>_net
-# - Metabase: banco também na rede 'infra_data' e usuário <app>_reader criado
+# - Métricas no Alloy: banco também na rede 'infra_data' e usuário monitor criado
 ```
 
 ### Traefik não roteia para a app

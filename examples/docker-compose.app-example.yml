@@ -3,10 +3,10 @@
 #
 #  Arquitetura: docs/ARCHITECTURE.md
 #  - App em traefik_public + infra_internal
-#  - Banco em minha_api_net (app) + infra_data (read-only p/ Metabase)
+#  - Banco em minha_api_net (app) + infra_data (métricas do Alloy)
 #  - Redis compartilhado via infra_internal (ver redis/databases.md)
 #
-#  IMPORTANTE: Crie o usuário *_reader no init do Postgres para o Metabase.
+#  IMPORTANTE: crie o usuário monitor (pg_monitor) para as métricas do Alloy.
 #  Ver examples/postgres-init-reader.sh
 # =============================================================
 
@@ -48,7 +48,7 @@ services:
 
   # Postgres exclusivo desta app — em duas redes:
   # minha_api_net: acesso total da app
-  # infra_data: Metabase conecta com usuário read-only (minha_api_reader)
+  # infra_data: o Alloy coleta as métricas com o usuário monitor
   minha-api-db:
     image: postgres:16-alpine
     container_name: minha-api-db

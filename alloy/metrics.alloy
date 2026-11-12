@@ -108,12 +108,6 @@ prometheus.exporter.blackbox "health" {
 	}
 
 	target {
-		name    = "metabase"
-		address = "http://metabase:3000/api/health"
-		module  = "http_2xx"
-	}
-
-	target {
 		name    = "grafana"
 		address = "http://grafana:3000/api/health"
 		module  = "http_2xx"
@@ -195,16 +189,11 @@ prometheus.exporter.postgres "evolution_db" {
 	data_source_names = ["postgresql://monitor:" + sys.env("POSTGRES_MONITOR_PASSWORD") + "@evolution-db:5432/postgres?sslmode=disable"]
 }
 
-prometheus.exporter.postgres "metabase_db" {
-	data_source_names = ["postgresql://monitor:" + sys.env("POSTGRES_MONITOR_PASSWORD") + "@metabase-db:5432/postgres?sslmode=disable"]
-}
-
 // instance = nome do container do banco (vem como postgresql://host:5432/db)
 discovery.relabel "postgres" {
 	targets = array.concat(
 		prometheus.exporter.postgres.notification_price_db.targets,
 		prometheus.exporter.postgres.evolution_db.targets,
-		prometheus.exporter.postgres.metabase_db.targets,
 	)
 
 	rule {

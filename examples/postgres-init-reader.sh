@@ -1,6 +1,6 @@
 #!/bin/bash
 # =============================================================
-#  Cria usuário read-only para o Metabase
+#  Cria usuário read-only para consultas avulsas
 #  Copie para: sua-app/postgres-init/01_create_reader.sh
 #  Troque minha_api_reader pelo nome da sua app.
 #
