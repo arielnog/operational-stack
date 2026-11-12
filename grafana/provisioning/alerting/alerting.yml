@@ -4,7 +4,7 @@
 # Por isso as anotações usam {{ .Labels.x }} em vez de {{ $labels.x }}.
 #
 # Toda regra (deste repositório ou das aplicações) leva duas labels, que viram a origem na mensagem:
-#   app:       a aplicação (notification-price, financas...; "infra" para VPS, Traefik, disco)
+#   app:       a aplicação (notification-price, evolution...; "infra" para VPS, Traefik, disco)
 #   container: o container de onde vem o problema; pode vir da query ('{{ index .Labels "name" }}')
 # e a severity: critical vira 🚨 INCIDENTE; warning vira ⚠️ AVISO.
 

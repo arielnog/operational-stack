@@ -102,12 +102,6 @@ prometheus.exporter.blackbox "health" {
 	}
 
 	target {
-		name    = "financas"
-		address = "http://financas/"
-		module  = "http_2xx"
-	}
-
-	target {
 		name    = "grafana"
 		address = "http://grafana:3000/api/health"
 		module  = "http_2xx"
