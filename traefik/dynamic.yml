@@ -33,6 +33,25 @@ http:
           - secHeaders
           - rateLimit
 
+    # Rate limit da API do /historico do price-redirect (busca e produto). Mais justo que o global: a tela faz
+    # no máximo umas 3 chamadas por segundo (busca com espera de 300 ms e rolagem), um script que varre o catálogo
+    # faz muito mais. Acima do limite, 429.
+    historyApiRateLimit:
+      rateLimit:
+        average: 5
+        burst: 20
+        period: 1s
+        sourceCriterion:
+          ipStrategy:
+            depth: 1
+
+    # Rota /historico/api do price-redirect: cabeçalhos de segurança + o limite acima (no lugar do global)
+    secureHistoryApi:
+      chain:
+        middlewares:
+          - secHeaders
+          - historyApiRateLimit
+
     # Só aceita origem no tailnet (*.int). Barra quem bate no IP público
     # com Host: <svc>.int..., já que portas publicadas pelo Docker ignoram o UFW
     tailnet-only:
